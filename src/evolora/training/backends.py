@@ -109,6 +109,7 @@ class RemoteTrainingBackend:
         remote_workspace: str = "/workspace",
         ssh_client_factory=None,
         evaluate_script_path: str | Path | None = None,
+        train_script_path: str | Path | None = None,
     ) -> None:
         cfg = get_config()
         self._base_url = base_url
@@ -123,6 +124,7 @@ class RemoteTrainingBackend:
         self._remote_workspace = remote_workspace.rstrip("/")
         self._ssh_client_factory = ssh_client_factory
         self._evaluate_script_path = Path(evaluate_script_path) if evaluate_script_path else _default_evaluate_script_path()
+        self._train_script_path = Path(train_script_path) if train_script_path else _default_train_script_path()
 
     async def train(
         self,
@@ -160,8 +162,9 @@ class RemoteTrainingBackend:
             "done": False,
         }
 
-        yield {"phase": "upload", "message": "Uploading VM evaluate.py", "done": False}
-        await asyncio.to_thread(self._push_evaluate_script)
+        yield {"phase": "upload", "message": "Uploading VM train.py + evaluate.py", "done": False}
+        await asyncio.to_thread(self._push_script, self._train_script_path, "train.py")
+        await asyncio.to_thread(self._push_script, self._evaluate_script_path, "evaluate.py")
 
         train_command = f"cd {self._remote_workspace} && python train.py"
         async for line in self._exec_remote_command(train_command):
@@ -245,16 +248,16 @@ class RemoteTrainingBackend:
         )
         return client
 
-    def _push_evaluate_script(self) -> None:
-        if not self._evaluate_script_path.exists():
-            raise RuntimeError(f"Missing VM evaluate script: {self._evaluate_script_path}")
+    def _push_script(self, local_path: Path, remote_name: str) -> None:
+        if not local_path.exists():
+            raise RuntimeError(f"Missing VM script: {local_path}")
 
-        content = self._evaluate_script_path.read_text(encoding="utf-8")
+        content = local_path.read_text(encoding="utf-8")
         client = self._connect_client()
         sftp = None
         try:
             sftp = client.open_sftp()
-            remote_path = f"{self._remote_workspace}/evaluate.py"
+            remote_path = f"{self._remote_workspace}/{remote_name}"
             with sftp.file(remote_path, "w") as remote_file:
                 remote_file.write(content)
         finally:
@@ -347,3 +350,9 @@ def _default_evaluate_script_path() -> Path:
     # Use the VM guy's committed evaluate.py (reads data/evals.json as [{input, expected}]
     # and fills "actual" in place) so the VM-side eval matches the agreed format.
     return Path(__file__).resolve().parents[3] / "src" / "virtual_machine_code" / "evaluate.py"
+
+
+def _default_train_script_path() -> Path:
+    # The VM guy's committed train.py (reads config.json + data/training_data.jsonl, saves the
+    # adapter to lora_model/). Pushed so a run is self-contained even if /workspace was wiped.
+    return Path(__file__).resolve().parents[3] / "src" / "virtual_machine_code" / "train.py"
