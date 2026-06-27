@@ -13,6 +13,13 @@ app = typer.Typer(name="evolora", help="EvoLoRA: auditable bounded self-improvem
 console = Console()
 
 
+@app.callback(invoke_without_command=True)
+def _default(ctx: typer.Context) -> None:
+    """Launch the TUI when 'evolora' is run with no subcommand."""
+    if ctx.invoked_subcommand is None:
+        tui()
+
+
 @app.command()
 def doctor() -> None:
     """Check environment and service connectivity."""

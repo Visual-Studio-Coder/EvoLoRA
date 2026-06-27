@@ -54,7 +54,7 @@ class EvoLoRAApp(App[None]):
         height: 3;
         padding: 0 2;
         background: #040904;
-        border-bottom: solid #001007;
+        border-bottom: solid #0a4018;
         layout: horizontal;
         align: center middle;
     }
@@ -80,7 +80,7 @@ class EvoLoRAApp(App[None]):
         padding: 0 1;
         content-align: center middle;
         color: #003d10;
-        border: solid #001a07;
+        border: solid #0a5a24;
     }
 
     .tab.active {
@@ -109,7 +109,7 @@ class EvoLoRAApp(App[None]):
 
     .panel {
         background: #080d08;
-        border: solid #001a07;
+        border: solid #0a5a24;
         padding: 1 2;
     }
 
@@ -163,7 +163,7 @@ class EvoLoRAApp(App[None]):
         height: 3;
         padding: 0 2;
         background: #040904;
-        border-top: solid #001007;
+        border-top: solid #0a4018;
         color: #007a1e;
         layout: horizontal;
         align: center middle;
@@ -192,7 +192,7 @@ class EvoLoRAApp(App[None]):
         height: 4;
         padding: 0 2;
         background: #040904;
-        border-top: solid #001507;
+        border-top: solid #0a4018;
         layout: horizontal;
         align: center middle;
     }
