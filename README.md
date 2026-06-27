@@ -1,3 +1,5 @@
+https://excalidraw.com/#room=eb97987f23a5b8e55daa,sGaQZ17EchEOWLst6Xxo0Q
+
 EvoLoRA helps an AI system practice, judge its own work, and improve while people can watch. It is a hackathon demo about making self-improvement feel controlled instead of mysterious.
 
 # EvoLoRA
