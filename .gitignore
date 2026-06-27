@@ -31,3 +31,13 @@ artifacts/
 
 # Local agent notes
 codex.md
+
+# Ignore heavy remote VM training artifacts
+src/virtual_machine_code/lora_model/
+src/virtual_machine_code/outputs/
+src/virtual_machine_code/generations/
+src/virtual_machine_code/unsloth_compiled_cache/
+*.safetensors
+*.bin
+*.model
+*.jinja
