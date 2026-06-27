@@ -25,7 +25,7 @@ from evolora.models.core import (
 from evolora.models.events import Event, EventKind
 from evolora.orchestration.retrain_advisor import RetrainAdvisor
 from evolora.persistence.artifacts import ArtifactStore, LocalArtifactStore
-from evolora.persistence.store import InMemoryRunStore, RunStore
+from evolora.persistence.store import RunStore, get_run_store
 from evolora.training.backends import MockTrainingBackend, TrainingBackend
 from evolora.training.runner import MockModelRunner, ModelRunner
 
@@ -59,7 +59,7 @@ class Orchestrator:
         self._runner = model_runner or MockModelRunner()
         self._judge = judge
         self._retrain_advisor = retrain_advisor
-        self._store = run_store or InMemoryRunStore()
+        self._store = run_store or get_run_store()
         self._artifacts = artifact_store or LocalArtifactStore("./artifacts")
         self._evaluator = ObjectiveEvaluator()
         self._cancelled = False

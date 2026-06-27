@@ -25,6 +25,9 @@ class Config(BaseModel):
 
     # Persistence
     mongodb_uri: str = Field(default="")
+    mongodb_db_name: str = Field(default="evolora")
+    mongodb_runs_collection: str = Field(default="runs")
+    mongodb_server_selection_timeout_ms: int = Field(default=3000)
     artifact_store: str = Field(default="local")
     artifact_dir: str = Field(default="./artifacts")
 
@@ -69,6 +72,11 @@ def get_config() -> Config:
         training_backend=os.getenv("TRAINING_BACKEND", "mock"),
         model_runner=os.getenv("MODEL_RUNNER", "mock"),
         mongodb_uri=os.getenv("MONGODB_URI", ""),
+        mongodb_db_name=os.getenv("MONGODB_DB_NAME", "evolora"),
+        mongodb_runs_collection=os.getenv("MONGODB_RUNS_COLLECTION", "runs"),
+        mongodb_server_selection_timeout_ms=int(
+            os.getenv("MONGODB_SERVER_SELECTION_TIMEOUT_MS", "3000")
+        ),
         artifact_store=os.getenv("ARTIFACT_STORE", "local"),
         artifact_dir=os.getenv("ARTIFACT_DIR", "./artifacts"),
         max_iterations=int(os.getenv("MAX_ITERATIONS", "3")),

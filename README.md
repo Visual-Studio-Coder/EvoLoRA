@@ -95,7 +95,10 @@ Key variables:
 - `DIGITAL_OCEAN_INFERENCE_BASE_URL`: defaults to `https://inference.do-ai.run/v1/`
 - `DIGITAL_OCEAN_JUDGE_MODEL`: defaults to `llama3.3-70b-instruct`
 - `BASE_MODEL_ID`: defaults to `microsoft/Phi-3-mini-128k-instruct`
-- `MONGODB_URI`: future persistent run history
+- `MONGODB_URI`: enables MongoDB Atlas run persistence
+- `MONGODB_DB_NAME`: defaults to `evolora`
+- `MONGODB_RUNS_COLLECTION`: defaults to `runs`
+- `MONGODB_SERVER_SELECTION_TIMEOUT_MS`: defaults to `3000`
 - `TRAINING_BACKEND`: `mock` by default; `unsloth` and `remote` are optional paths
 - `MODEL_RUNNER`: `mock` by default
 - `MAX_ITERATIONS`, `TARGET_SCORE`, `IMPROVEMENT_THRESHOLD`, `PATIENCE`: loop controls
@@ -121,7 +124,7 @@ artifacts/            Ignored runtime outputs
 
 ## Boundaries
 
-Mock mode is real and supported. Live MiniMax planning and live DigitalOcean judging are optional. When the DigitalOcean model access key is missing or the call fails, EvoLoRA labels the judge result as a heuristic fallback. Real Unsloth or remote GPU training should stay clearly labeled until it is smoke-tested. Do not commit `.env`, generated adapters, checkpoints, or secrets.
+Mock mode is real and supported. Live MiniMax planning and live DigitalOcean judging are optional. When the DigitalOcean model access key is missing or the call fails, EvoLoRA labels the judge result as a heuristic fallback. When `MONGODB_URI` is configured, each run is upserted into MongoDB with `run_id` as `_id`; every iteration's hyperparameters and LLM-as-judge report are also copied into query-friendly `hyperparams_by_iteration` and `judge_reports` arrays linked by the same `run_id`. If MongoDB is unreachable, the run falls back to in-memory storage so demos keep working. Real Unsloth or remote GPU training should stay clearly labeled until it is smoke-tested. Do not commit `.env`, generated adapters, checkpoints, or secrets.
 
 ## Current Status
 
