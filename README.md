@@ -1,8 +1,8 @@
-EvoLoRA uses a MiniMax agent to train Phi-3-mini-128k-instruct into a model specialized for a chosen task. It turns that improvement process into a visible loop where the agent plans, Phi trains, results are scored, and the best version is kept.
+EvoLoRA uses a MiniMax agent to train Phi-3-mini-128k-instruct so it gets better at one focused job. It turns that learning process into a visible loop where the agent plans, Phi trains, results are scored, and the best version is kept.
 
 # EvoLoRA
 
-EvoLoRA is an auditable self-improvement loop for specializing Phi-3-mini-128k-instruct with LoRA. The demo starts with a task, measures how well Phi performs, asks MiniMax to plan better training examples and LoRA settings, runs a training backend, evaluates the result against a locked benchmark, and keeps the best adapter.
+EvoLoRA is an auditable self-improvement loop for specializing Phi-3-mini-128k-instruct with LoRA. The demo starts with a task, measures how well Phi performs, asks MiniMax to plan better training examples and LoRA settings, runs a training backend, evaluates the result against a locked benchmark, and keeps the best result.
 
 Design sketch: https://excalidraw.com/#room=eb97987f23a5b8e55daa,sGaQZ17EchEOWLst6Xxo0Q
 
