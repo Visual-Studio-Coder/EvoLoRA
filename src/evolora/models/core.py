@@ -58,7 +58,7 @@ class LoraHyperparams(BaseModel):
     lora_alpha: int = Field(default=16, ge=1, le=256)
     lora_dropout: float = Field(default=0.05, ge=0.0, le=0.5)
     learning_rate: float = Field(default=2e-4, gt=0.0, le=0.1)
-    num_epochs: int = Field(default=1, ge=1, le=5)
+    num_epochs: int = Field(default=1, ge=1, le=6)
     batch_size: int = Field(default=4, ge=1, le=32)
     warmup_steps: int = Field(default=10, ge=0, le=500)
     weight_decay: float = Field(default=0.01, ge=0.0, le=0.5)
