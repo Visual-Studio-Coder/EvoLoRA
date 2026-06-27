@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import traceback
 from datetime import datetime
 
 from textual.app import App, ComposeResult
@@ -15,6 +16,7 @@ from evolora.demo.task import ADAPTIVE_EVAL_SET, LOCKED_EVAL_SET
 from evolora.evaluation.digitalocean_judge import get_judge
 from evolora.models.core import RunConfig
 from evolora.models.events import Event, EventKind
+from evolora.observability.run_logger import default_log_dir
 from evolora.orchestration.orchestrator import Orchestrator
 from evolora.orchestration.retrain_advisor import get_retrain_advisor
 from evolora.training.backends import get_backend
@@ -505,8 +507,11 @@ class EvoLoRAApp(App[None]):
             async for event in await self._orchestrator.run():
                 self._apply_event(event)
         except Exception as exc:  # pragma: no cover - defensive UI boundary
+            error_path = self._write_tui_exception(exc)
             self._set_state("FAILED", str(exc))
             self._agent_log().write(f"[red][x] TUI run failed:[/] {exc}")
+            if error_path:
+                self._agent_log().write(f"[red][x] Full traceback saved:[/] {error_path}")
         finally:
             self._run_active = False
             self.query_one("#start-button", Button).disabled = False
@@ -522,6 +527,9 @@ class EvoLoRAApp(App[None]):
             mode = "MOCK" if data.get("mock") else "REAL"
             self._set_state("RUNNING", f"{mode} run {event.run_id[:8]} started")
             self._agent_log().write(f"[green][OK][/] EvoLoRA run started: [bold]{event.run_id[:8]}[/]")
+            readable_log = self._current_readable_log_path()
+            if readable_log:
+                self._agent_log().write(f"[cyan][log][/] Full run log: {readable_log}")
             return
 
         if kind == EventKind.EVAL_SET_LOCKED:
@@ -828,3 +836,24 @@ class EvoLoRAApp(App[None]):
 
     def _examples_log(self) -> RichLog:
         return self.query_one("#examples-log", RichLog)
+
+    def _current_readable_log_path(self) -> str:
+        if self._orchestrator is None:
+            return ""
+        logger = getattr(self._orchestrator, "_run_logger", None)
+        path = getattr(logger, "readable_path", None)
+        return str(path) if path else ""
+
+    def _write_tui_exception(self, exc: Exception) -> str:
+        try:
+            log_dir = default_log_dir()
+            log_dir.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            path = log_dir / f"tui-error-{stamp}.log"
+            path.write_text(
+                "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
+                encoding="utf-8",
+            )
+            return str(path)
+        except Exception:
+            return ""

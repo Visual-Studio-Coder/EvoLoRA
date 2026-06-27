@@ -9,7 +9,7 @@ import pytest
 from evolora.demo.task import ADAPTIVE_EVAL_SET, LOCKED_EVAL_SET
 from evolora.models.core import RunConfig
 from evolora.models.events import Event, EventKind
-from evolora.observability.run_logger import RunLogger
+from evolora.observability.run_logger import RunLogger, default_log_dir
 from evolora.orchestration.orchestrator import Orchestrator
 from evolora.persistence.store import InMemoryRunStore
 
@@ -37,6 +37,14 @@ def test_run_logger_disabled_writes_nothing(tmp_path):
     logger.log_event(Event(kind=EventKind.LOG, run_id="x", message="nope"))
     assert list(tmp_path.iterdir()) == []
     assert logger.path is None
+
+
+def test_default_log_dir_prefers_current_project_root(tmp_path, monkeypatch):
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = \"evolora\"\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("EVOLORA_LOG_DIR", raising=False)
+
+    assert default_log_dir() == tmp_path / "logs"
 
 
 @pytest.mark.asyncio
