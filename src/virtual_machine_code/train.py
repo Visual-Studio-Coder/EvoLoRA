@@ -2,8 +2,7 @@ import json
 
 import torch
 from datasets import load_dataset
-from transformers import TrainingArguments
-from trl import SFTTrainer
+from trl import SFTConfig, SFTTrainer
 from unsloth import FastLanguageModel
 
 # ====================== LOAD CONFIG ======================
@@ -57,7 +56,9 @@ def formatting_prompts_func(examples):
 
 dataset = dataset.map(formatting_prompts_func, batched=True)
 
-training_args = TrainingArguments(
+# trl 0.24: dataset_text_field and max_length live on SFTConfig (not SFTTrainer),
+# and max_seq_length was renamed to max_length.
+training_args = SFTConfig(
     per_device_train_batch_size=per_device_train_batch_size,
     gradient_accumulation_steps=gradient_accumulation_steps,
     warmup_steps=5,
@@ -73,13 +74,13 @@ training_args = TrainingArguments(
     output_dir="outputs",
     report_to="none",
     save_strategy="no",
+    dataset_text_field="text",
+    max_length=max_seq_length,
 )
 
 trainer = SFTTrainer(
     model=model,
     train_dataset=dataset,
-    dataset_text_field="text",
-    max_seq_length=max_seq_length,
     args=training_args,
 )
 

@@ -33,7 +33,14 @@ FastLanguageModel.for_inference(model)
 with open(evals_path) as f:
     evals = json.load(f)
 
-print("Running baseline inference...")
+def _save():
+    # Write after every eval so a mid-run crash (OOM, disconnect) keeps partial
+    # progress instead of throwing away all baseline work.
+    with open(evals_path, "w") as f:
+        json.dump(evals, f, indent=4)
+
+
+print("Running baseline inference...", flush=True)
 for index, item in enumerate(evals, start=1):
     prompt = f"""### Input:
 {item["input"]}
@@ -53,9 +60,8 @@ for index, item in enumerate(evals, start=1):
 
     item["actual"] = actual_response
     item["score"] = None
-    print(f"Baseline eval {index}/{len(evals)} complete")
+    _save()
+    print(f"Baseline eval {index}/{len(evals)} complete", flush=True)
 
-with open(evals_path, "w") as f:
-    json.dump(evals, f, indent=4)
-
-print(f"Baseline complete. Outputs saved to {evals_path}")
+_save()
+print(f"Baseline complete. Outputs saved to {evals_path}", flush=True)
