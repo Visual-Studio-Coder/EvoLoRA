@@ -102,7 +102,13 @@ class Orchestrator:
 
             prev_score = rec.iterations[-1].score if rec.iterations else baseline_score
             failures = self._get_failures(rec)
-            plan, fallback = await self._plan(iteration, baseline_score, prev_score, failures)
+            plan, fallback = await self._plan(
+                iteration,
+                baseline_score,
+                prev_score,
+                failures,
+                rec.config.training_sample_count,
+            )
 
             if fallback:
                 yield await emit(EventKind.AGENT_FALLBACK_USED, "MiniMax unavailable — heuristic plan used")
@@ -111,7 +117,18 @@ class Orchestrator:
             # --- VALIDATE DATA ---
             rec.status = RunStatus.VALIDATING
             validated_plan = self._validate_plan(plan)
-            yield await emit(EventKind.VALIDATION_COMPLETE, f"Plan validated: {len(validated_plan.data_spec.examples)} examples")
+            exact_count = rec.config.training_sample_count
+            count_note = (
+                f"exact requested count {exact_count}"
+                if exact_count is not None
+                else "agent-selected count"
+            )
+            yield await emit(
+                EventKind.VALIDATION_COMPLETE,
+                f"Plan validated: {len(validated_plan.data_spec.examples)} examples ({count_note})",
+                example_count=len(validated_plan.data_spec.examples),
+                requested_training_sample_count=exact_count,
+            )
 
             # --- TRAIN ---
             rec.status = RunStatus.TRAINING
@@ -226,14 +243,62 @@ class Orchestrator:
         responses = await self._runner.run_batch(prompts, adapter_path=adapter_path)
         return self._evaluator(es.samples, responses)
 
-    async def _plan(self, iteration, baseline_score, current_score, failures):
+    async def _plan(
+        self,
+        iteration,
+        baseline_score,
+        current_score,
+        failures,
+        training_sample_count: int | None,
+    ):
         if isinstance(self._planner, MiniMaxPlanner):
-            return await self._planner.plan(iteration, baseline_score, current_score, failures)
-        return self._planner.plan(iteration, baseline_score, current_score, failures), False
+            return await self._planner.plan(
+                iteration,
+                baseline_score,
+                current_score,
+                failures,
+                training_sample_count,
+            )
+        return (
+            self._planner.plan(
+                iteration,
+                baseline_score,
+                current_score,
+                failures,
+                training_sample_count,
+            ),
+            False,
+        )
 
     def _validate_plan(self, plan: AgentPlan) -> AgentPlan:
-        # Already validated by Pydantic — just return
-        return plan
+        requested = self._config.training_sample_count
+        if requested is None:
+            return plan
+
+        examples = list(plan.data_spec.examples[:requested])
+        while len(examples) < requested:
+            examples.append(self._synthetic_training_example(len(examples) + 1))
+
+        data_spec = plan.data_spec.model_copy(update={"examples": examples, "max_examples": requested})
+        return plan.model_copy(update={"data_spec": data_spec})
+
+    def _synthetic_training_example(self, index: int) -> dict[str, str]:
+        alice_a = 100 + index
+        alice_b = 200 + index
+        bob = 50 + index
+        alice_total = alice_a + alice_b
+        revenue = alice_total + bob
+        return {
+            "prompt": (
+                f'Customers: [{{"name":"Alice","purchases":[{alice_a},{alice_b}]}}, '
+                f'{{"name":"Bob","purchases":[{bob}]}}]. Summarize.'
+            ),
+            "completion": (
+                f'{{"top_customer":"Alice","top_customer_total":{alice_total},'
+                f'"customer_count":2,"total_revenue":{revenue},'
+                f'"summary":"Alice leads with ${alice_total} in purchases."}}'
+            ),
+        }
 
     def _get_failures(self, rec: RunRecord) -> list[EvalResult]:
         if not rec.iterations:
@@ -245,8 +310,6 @@ class Orchestrator:
         cfg = rec.config
         if score >= cfg.target_score:
             return StopReason.TARGET_SCORE
-        if rec.total_cost_usd >= cfg.max_budget_usd:
-            return StopReason.BUDGET_CAP
         if rec.no_improvement_count() >= cfg.patience:
             return StopReason.PATIENCE
         return None

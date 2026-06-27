@@ -70,6 +70,15 @@ async def test_best_iteration_preserved():
 
 
 @pytest.mark.asyncio
+async def test_exact_training_sample_count_is_enforced():
+    orch = _make_orch(max_iterations=1, target_score=1.0, training_sample_count=12)
+    _, rec = await _collect(orch)
+    assert rec.iterations
+    assert len(rec.iterations[0].plan.data_spec.examples) == 12
+    assert rec.iterations[0].plan.data_spec.max_examples == 12
+
+
+@pytest.mark.asyncio
 async def test_no_secrets_in_prompts():
     """Eval prompts passed to runner must not contain expected answers."""
     prompts = LOCKED_EVAL_SET.prompts_only()

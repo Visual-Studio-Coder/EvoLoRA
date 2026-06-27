@@ -50,6 +50,16 @@ def test_run_record_is_not_terminal_initially():
     assert not rec.is_terminal
 
 
+def test_training_sample_count_bounds():
+    assert RunConfig().training_sample_count == 30
+    assert RunConfig(training_sample_count=25).training_sample_count == 25
+    assert RunConfig(training_sample_count=None).training_sample_count is None
+    with pytest.raises(ValidationError):
+        RunConfig(training_sample_count=0)
+    with pytest.raises(ValidationError):
+        RunConfig(training_sample_count=501)
+
+
 def test_no_improvement_count_zero_initially():
     cfg = RunConfig()
     rec = RunRecord(config=cfg)

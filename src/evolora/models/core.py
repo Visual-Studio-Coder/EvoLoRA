@@ -41,7 +41,6 @@ class RunStatus(StrEnum):
 class StopReason(StrEnum):
     TARGET_SCORE = "target_score"
     MAX_ITERATIONS = "max_iterations"
-    BUDGET_CAP = "budget_cap"
     PATIENCE = "patience"
     TRAINING_FAILURE = "training_failure"
     EVAL_HASH_CHANGED = "eval_hash_changed"
@@ -75,7 +74,7 @@ class LoraHyperparams(BaseModel):
 class TrainingDataSpec(BaseModel):
     examples: list[dict[str, str]] = Field(default_factory=list)
     rationale: str = Field(default="")
-    max_examples: int = Field(default=50, ge=1, le=200)
+    max_examples: int = Field(default=50, ge=1, le=500)
 
     @field_validator("examples")
     @classmethod
@@ -166,13 +165,13 @@ class RunConfig(BaseModel):
     run_id: str = Field(default_factory=_run_id)
     task_name: str = Field(default="customer_spending_summary")
     max_iterations: int = Field(default=3, ge=1, le=20)
-    max_budget_usd: float = Field(default=10.0, gt=0.0)
     target_score: float = Field(default=0.85, ge=0.0, le=1.0)
     improvement_threshold: float = Field(default=0.01, ge=0.0)
     patience: int = Field(default=2, ge=1)
     training_backend: str = Field(default="mock")
     model_runner: str = Field(default="mock")
     base_model_id: str = Field(default="microsoft/Phi-3-mini-128k-instruct")
+    training_sample_count: int | None = Field(default=30, ge=1, le=500)
     created_at: datetime = Field(default_factory=_now)
 
 

@@ -19,6 +19,12 @@ dist/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.coverage
+htmlcov/
 
 # Runtime artifacts (adapters, checkpoints)
 artifacts/
+
+# Local logs and OS files
+*.log
+.DS_Store

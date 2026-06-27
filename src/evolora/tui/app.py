@@ -202,6 +202,20 @@ class EvoLoRAApp(App[None]):
         border: solid #002a0c;
     }
 
+    #sample-label {
+        width: 10;
+        margin: 0 0 0 1;
+        content-align: right middle;
+        color: #004018;
+    }
+
+    #sample-count-input {
+        width: 10;
+        background: #060c06;
+        color: #39ff14;
+        border: solid #002a0c;
+    }
+
     #start-button {
         min-width: 14;
         margin: 0 0 0 1;
@@ -222,11 +236,12 @@ class EvoLoRAApp(App[None]):
     def __init__(self) -> None:
         super().__init__()
         self._orchestrator: Orchestrator | None = None
-        self._running = False
+        self._run_active = False
         self._loss_values: list[float] = []
         self._baseline = 0.0
         self._best = 0.0
         self._current = 0.0
+        self._requested_sample_count: int | None = 30
 
     def compose(self) -> ComposeResult:
         with Container(id="frame"):
@@ -279,6 +294,14 @@ class EvoLoRAApp(App[None]):
                     placeholder="What kind of specialized model would you like to build today?",
                     id="goal-input",
                 )
+                yield Static("# samples", id="sample-label")
+                yield Input(
+                    value="30",
+                    placeholder="auto",
+                    restrict=r"[0-9]*",
+                    max_length=3,
+                    id="sample-count-input",
+                )
                 yield Button("START", id="start-button")
                 yield Button("CANCEL", id="cancel-button", disabled=True)
 
@@ -297,15 +320,21 @@ class EvoLoRAApp(App[None]):
             self.action_cancel_run()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        if event.input.id == "goal-input":
+        if event.input.id in {"goal-input", "sample-count-input"}:
             self.action_start_run()
 
     def action_start_run(self) -> None:
-        if self._running:
+        if self._run_active:
             self._agent_log().write("[yellow][!] Run already in progress[/]")
             return
 
-        self._running = True
+        sample_count = self._parse_sample_count()
+        if sample_count == 0:
+            return
+
+        self._requested_sample_count = sample_count
+        self._update_config_panel()
+        self._run_active = True
         self._loss_values.clear()
         self._baseline = 0.0
         self._best = 0.0
@@ -314,7 +343,12 @@ class EvoLoRAApp(App[None]):
         self.query_one("#cancel-button", Button).disabled = False
         self._agent_log().clear()
         self._examples_log().clear()
-        self._set_state("STARTING", "building mock-first EvoLoRA run")
+        sample_label = (
+            f"exactly {sample_count} training samples"
+            if sample_count is not None
+            else "agent-selected training sample count"
+        )
+        self._set_state("STARTING", f"building mock-first EvoLoRA run | {sample_label}")
         self.query_one("#training-progress", ProgressBar).update(total=100, progress=0)
         self.run_worker(self._run_evolora(), group="evolora-run", exclusive=True)
 
@@ -328,13 +362,13 @@ class EvoLoRAApp(App[None]):
         cfg = get_config()
         run_config = RunConfig(
             max_iterations=cfg.max_iterations,
-            max_budget_usd=cfg.max_budget_usd,
             target_score=cfg.target_score,
             improvement_threshold=cfg.improvement_threshold,
             patience=cfg.patience,
             training_backend=cfg.training_backend,
             model_runner=cfg.model_runner,
             base_model_id=cfg.base_model_id,
+            training_sample_count=self._requested_sample_count,
         )
 
         backend = get_backend(cfg.training_backend)
@@ -362,7 +396,7 @@ class EvoLoRAApp(App[None]):
             self._set_state("FAILED", str(exc))
             self._agent_log().write(f"[red][x] TUI run failed:[/] {exc}")
         finally:
-            self._running = False
+            self._run_active = False
             self.query_one("#start-button", Button).disabled = False
             self.query_one("#cancel-button", Button).disabled = True
             self._update_examples_from_record()
@@ -537,10 +571,15 @@ class EvoLoRAApp(App[None]):
             ("backend", cfg.training_backend),
             ("runner", cfg.model_runner),
             ("agent", "MiniMax" if cfg.minimax_available else "heuristic"),
+            (
+                "samples",
+                str(self._requested_sample_count)
+                if self._requested_sample_count is not None
+                else "auto",
+            ),
             ("eval_hash", eval_hash or "pending"),
             ("target", f"{cfg.target_score:.2f}"),
             ("max_iters", str(cfg.max_iterations)),
-            ("budget", f"${cfg.max_budget_usd:.2f}"),
         ]
         if focus:
             lines.append(("focus", focus[:20]))
@@ -585,6 +624,18 @@ class EvoLoRAApp(App[None]):
     def _set_state(self, state: str, detail: str) -> None:
         self.query_one("#run-state", Static).update(state)
         self.query_one("#status-text", Static).update(detail)
+
+    def _parse_sample_count(self) -> int | None:
+        raw = self.query_one("#sample-count-input", Input).value.strip()
+        if not raw:
+            return None
+        count = int(raw)
+        if not 1 <= count <= 500:
+            self._set_state("INVALID", "training sample count must be blank or between 1 and 500")
+            self._agent_log().write("[red][x] Training sample count must be blank or between 1 and 500[/]")
+            self.query_one("#sample-count-input", Input).focus()
+            return 0
+        return count
 
     def _update_score_text(self) -> None:
         self.query_one("#score-text", Static).update(

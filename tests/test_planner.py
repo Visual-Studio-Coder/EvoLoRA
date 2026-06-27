@@ -5,7 +5,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from evolora.agent.planner import HeuristicPlanner, _parse_plan
+from evolora.agent.planner import HeuristicPlanner, _parse_plan, get_planner
 from evolora.models.core import EvalResult
 
 
@@ -25,6 +25,11 @@ def test_heuristic_plan_increases_r_over_iterations():
     plan1 = p.plan(1, 0.5, 0.5, _failures())
     plan3 = p.plan(3, 0.5, 0.5, _failures())
     assert plan3.hyperparams.r >= plan1.hyperparams.r
+
+
+def test_get_planner_defaults_to_heuristic_without_key():
+    planner = get_planner(use_minimax=True)
+    assert isinstance(planner, HeuristicPlanner)
 
 
 def test_parse_plan_valid_json():

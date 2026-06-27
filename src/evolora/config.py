@@ -15,8 +15,7 @@ class Config(BaseModel):
     # MiniMax
     minimax_api_key: str = Field(default="")
     minimax_model: str = Field(default="MiniMax-M2.7-highspeed")
-    # Anthropic-compatible endpoint (NOT the /v1 OpenAI-compatible one) — used via the Anthropic SDK
-    minimax_base_url: str = Field(default="https://api.minimax.io/anthropic")
+    minimax_base_url: str = Field(default="https://api.minimax.io/v1")
     minimax_group_id: str = Field(default="")
 
     # Training
@@ -31,7 +30,6 @@ class Config(BaseModel):
 
     # Loop control
     max_iterations: int = Field(default=3)
-    max_budget_usd: float = Field(default=10.0)
     target_score: float = Field(default=0.85)
     improvement_threshold: float = Field(default=0.01)
     patience: int = Field(default=2)
@@ -60,7 +58,7 @@ def get_config() -> Config:
     return Config(
         minimax_api_key=os.getenv("MINIMAX_API_KEY", ""),
         minimax_model=os.getenv("MINIMAX_MODEL", "MiniMax-M2.7-highspeed"),
-        minimax_base_url=os.getenv("MINIMAX_BASE_URL", "https://api.minimax.io/anthropic"),
+        minimax_base_url=os.getenv("MINIMAX_BASE_URL", "https://api.minimax.io/v1"),
         minimax_group_id=os.getenv("MINIMAX_GROUP_ID", ""),
         training_backend=os.getenv("TRAINING_BACKEND", "mock"),
         model_runner=os.getenv("MODEL_RUNNER", "mock"),
@@ -68,7 +66,6 @@ def get_config() -> Config:
         artifact_store=os.getenv("ARTIFACT_STORE", "local"),
         artifact_dir=os.getenv("ARTIFACT_DIR", "./artifacts"),
         max_iterations=int(os.getenv("MAX_ITERATIONS", "3")),
-        max_budget_usd=float(os.getenv("MAX_BUDGET_USD", "10.0")),
         target_score=float(os.getenv("TARGET_SCORE", "0.85")),
         improvement_threshold=float(os.getenv("IMPROVEMENT_THRESHOLD", "0.01")),
         patience=int(os.getenv("PATIENCE", "2")),

@@ -69,7 +69,6 @@ async def _demo(mock: bool, iterations: int) -> None:
 
     run_config = RunConfig(
         max_iterations=iterations,
-        max_budget_usd=cfg.max_budget_usd,
         target_score=cfg.target_score,
         training_backend="mock" if mock else cfg.training_backend,
         model_runner="mock" if mock else cfg.model_runner,
@@ -146,18 +145,21 @@ async def _smoke_minimax() -> None:
         console.print("[red]MINIMAX_API_KEY not set.[/red]")
         raise typer.Exit(1)
     try:
-        import anthropic
+        from openai import AsyncOpenAI
 
-        client = anthropic.AsyncAnthropic(
+        client = AsyncOpenAI(
             api_key=cfg.minimax_api_key,
             base_url=cfg.minimax_base_url,
         )
-        resp = await client.messages.create(
+        resp = await client.chat.completions.create(
             model=cfg.minimax_model,
-            messages=[{"role": "user", "content": 'Reply with {"ok": true}'}],
+            messages=[
+                {"role": "user", "content": 'Reply with {"ok": true}'},
+            ],
             max_tokens=20,
         )
-        console.print(f"[green]MiniMax OK ({cfg.minimax_model}):[/green] {resp.content[0].text}")
+        content = resp.choices[0].message.content or ""
+        console.print(f"[green]MiniMax OK ({cfg.minimax_model}):[/green] {content}")
     except Exception as exc:
         console.print(f"[red]MiniMax FAILED:[/red] {exc}")
         raise typer.Exit(1)

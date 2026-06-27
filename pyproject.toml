@@ -10,7 +10,6 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.7",
-    "anthropic>=0.28",
     "openai>=1.30",
     "typer>=0.12",
     "textual>=0.63",
