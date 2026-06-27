@@ -172,6 +172,7 @@ def smoke_minimax() -> None:
 
 
 async def _smoke_minimax() -> None:
+    from evolora.agent.planner import _strip_think
     from evolora.config import get_config
 
     cfg = get_config()
@@ -190,9 +191,10 @@ async def _smoke_minimax() -> None:
             messages=[
                 {"role": "user", "content": 'Reply with {"ok": true}'},
             ],
-            max_tokens=20,
+            temperature=0.0,
+            max_tokens=200,
         )
-        content = resp.choices[0].message.content or ""
+        content = _strip_think(resp.choices[0].message.content or "").strip()
         console.print(f"[green]MiniMax OK ({cfg.minimax_model}):[/green] {content}")
     except Exception as exc:
         console.print(f"[red]MiniMax FAILED:[/red] {exc}")

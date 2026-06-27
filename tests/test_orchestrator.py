@@ -82,6 +82,14 @@ class EvalGatePlanner(MiniMaxPlanner):
         return HeuristicPlanner().plan(*args, **kwargs), False
 
 
+class FallbackReasonPlanner(MiniMaxPlanner):
+    def __init__(self) -> None:
+        self.last_error = "BadRequestError: invalid function arguments json string"
+
+    async def plan(self, *args, **kwargs):
+        return HeuristicPlanner().plan(*args, **kwargs), True
+
+
 class StaticLLMJudge:
     async def judge(self, records: list[dict]) -> tuple[float, list[dict]]:
         scored = []
@@ -235,6 +243,23 @@ async def test_remote_baseline_uses_vm_records_and_llm_judge():
     assert rec.iterations[0].score == 0.8
     assert "[remote:baseline] baseline live log" in log_messages
     assert "[remote:train] unsloth step 1" in log_messages
+
+
+@pytest.mark.asyncio
+async def test_fallback_event_includes_minimax_failure_reason():
+    cfg = RunConfig(max_iterations=1, target_score=1.0)
+    orch = Orchestrator(
+        config=cfg,
+        eval_set=LOCKED_EVAL_SET,
+        planner=FallbackReasonPlanner(),
+        run_store=InMemoryRunStore(),
+    )
+
+    events, _ = await _collect(orch)
+    fallback_event = next(event for event in events if event.kind == EventKind.AGENT_FALLBACK_USED)
+
+    assert "invalid function arguments" in fallback_event.message
+    assert fallback_event.data["reason"] == "BadRequestError: invalid function arguments json string"
 
 
 @pytest.mark.asyncio

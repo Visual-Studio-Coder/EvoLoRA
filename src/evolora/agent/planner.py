@@ -35,6 +35,15 @@ Call the create_evals tool with `criteria` (what a correct answer must satisfy) 
 correct JSON object the model should produce. Make examples varied, realistic, and objectively
 checkable."""
 
+MINIMAX_TOOL_MAX_TOKENS = 8000
+MINIMAX_EVAL_MAX_TOKENS = 8000
+MINIMAX_MAX_TOOL_ROUNDS = 8
+MINIMAX_EXAMPLE_BATCH_SIZE = 10
+
+
+class MiniMaxPlanError(RuntimeError):
+    """Raised when MiniMax cannot complete the bounded tool workflow."""
+
 
 def _strip_think(text: str) -> str:
     """Remove <think>...</think> blocks that some models emit."""
@@ -92,6 +101,7 @@ class MiniMaxPlanner:
         self._api_key = api_key
         self._model = model
         self._base_url = base_url
+        self.last_error = ""
 
     def _make_client(self):
         from openai import AsyncOpenAI
@@ -109,6 +119,7 @@ class MiniMaxPlanner:
         failures: list[EvalResult],
         training_sample_count: int | None = None,
         goal: str = "",
+        example_batch_size: int = MINIMAX_EXAMPLE_BATCH_SIZE,
     ) -> str:
         failure_summary = [
             {"sample_id": f.sample_id, "score": f.score, "details": f.details}
@@ -129,7 +140,11 @@ class MiniMaxPlanner:
                 "If user_goal is provided, tailor the eval criteria and training examples toward "
                 "it (while keeping outputs as strict JSON). "
                 "If requested_training_sample_count is not null, add exactly that many training "
-                "examples. If it is null, choose a sensible number yourself. "
+                "examples. Use multiple add_training_examples calls with at most "
+                f"{example_batch_size} examples per call. If it is null, choose a sensible "
+                "number yourself. "
+                "Every training completion must be a valid JSON object string. For SQL tasks, "
+                'wrap the answer as {"sql": "<query>"}. '
                 "Do NOT include expected answers in your training data."
             ),
         })
@@ -144,9 +159,60 @@ class MiniMaxPlanner:
         goal: str = "",
     ) -> tuple[AgentPlan, bool]:
         """Return (plan, fallback_used). Drives the three tools; falls back on any failure."""
+        errors: list[str] = []
+        for batch_size in (MINIMAX_EXAMPLE_BATCH_SIZE, 5):
+            try:
+                plan = await self._plan_with_tools(
+                    iteration,
+                    baseline_score,
+                    current_score,
+                    failures,
+                    training_sample_count,
+                    goal,
+                    batch_size,
+                )
+                self.last_error = ""
+                return plan
+            except (
+                MiniMaxPlanError,
+                json.JSONDecodeError,
+                ValidationError,
+                ValueError,
+                KeyError,
+                IndexError,
+                AttributeError,
+            ) as exc:
+                errors.append(f"{exc.__class__.__name__}: {exc}")
+                continue
+            except Exception as exc:
+                errors.append(f"{exc.__class__.__name__}: {exc}")
+                continue
+
+        self.last_error = " | ".join(errors[-2:]) if errors else "unknown MiniMax planner failure"
+        fallback = HeuristicPlanner().plan(
+            iteration, baseline_score, current_score, failures, training_sample_count, goal
+        )
+        return fallback, True
+
+    async def _plan_with_tools(
+        self,
+        iteration: int,
+        baseline_score: float,
+        current_score: float,
+        failures: list[EvalResult],
+        training_sample_count: int | None,
+        goal: str,
+        example_batch_size: int,
+    ) -> tuple[AgentPlan, bool]:
         client = self._make_client()
         user_prompt = self._build_user_prompt(
-            iteration, baseline_score, current_score, failures, training_sample_count, goal
+            iteration,
+            baseline_score,
+            current_score,
+            failures,
+            training_sample_count,
+            goal,
+            example_batch_size,
         )
         messages: list[dict] = [
             {"role": "system", "content": _TOOL_SYSTEM_PROMPT},
@@ -158,87 +224,96 @@ class MiniMaxPlanner:
         rationale_bits: list[str] = []
         hyperparams: dict | None = None
 
-        try:
-            for _round in range(6):  # bounded tool-calling turns
-                resp = await client.chat.completions.create(
-                    model=self._model,
-                    messages=messages,
-                    tools=TOOLS,
-                    tool_choice="auto",
-                    temperature=0.3,
-                    max_tokens=2000,
-                )
-                msg = resp.choices[0].message
-                tool_calls = msg.tool_calls or []
-
-                if not tool_calls:
-                    # Model answered without tools — accept a legacy single-shot JSON plan.
-                    content = (msg.content or "").strip()
-                    if content:
-                        return _parse_plan(content), False
-                    break
-
-                messages.append({
-                    "role": "assistant",
-                    "content": msg.content or "",
-                    "tool_calls": [
-                        {
-                            "id": tc.id,
-                            "type": "function",
-                            "function": {
-                                "name": tc.function.name,
-                                "arguments": tc.function.arguments,
-                            },
-                        }
-                        for tc in tool_calls
-                    ],
-                })
-
-                done = False
-                for tc in tool_calls:
-                    name = tc.function.name
-                    try:
-                        args = json.loads(tc.function.arguments or "{}")
-                    except json.JSONDecodeError:
-                        args = {}
-
-                    if name == "create_evals":
-                        criteria = [str(c) for c in args.get("criteria", [])][:10]
-                        result = f"Recorded {len(criteria)} eval criteria."
-                    elif name == "add_training_examples":
-                        accepted, rationale = extract_training_payload(args)
-                        examples.extend(accepted)
-                        if rationale:
-                            rationale_bits.append(rationale)
-                        result = f"Accepted {len(accepted)} examples ({len(examples)} total)."
-                    elif name == "start_training_model":
-                        hyperparams = coerce_hyperparams(args)
-                        result = f"Training launched with {hyperparams}."
-                        done = True
-                    else:
-                        result = f"Unknown tool {name!r} ignored."
-
-                    messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
-
-                if done:
-                    break
-
-            if hyperparams is None or not examples:
-                raise ValueError("agent did not produce a complete tool-driven plan")
-
-            plan = _assemble_plan(
-                iteration, hyperparams, examples, criteria, rationale_bits, training_sample_count
+        for _round in range(MINIMAX_MAX_TOOL_ROUNDS):  # bounded tool-calling turns
+            resp = await client.chat.completions.create(
+                model=self._model,
+                messages=messages,
+                tools=TOOLS,
+                tool_choice="auto",
+                temperature=0.3,
+                max_tokens=MINIMAX_TOOL_MAX_TOKENS,
             )
-            return plan, False
-        except (json.JSONDecodeError, ValidationError, ValueError, KeyError, IndexError, AttributeError):
-            pass
-        except Exception:
-            pass
+            choice = resp.choices[0]
+            msg = choice.message
+            tool_calls = msg.tool_calls or []
 
-        fallback = HeuristicPlanner().plan(
-            iteration, baseline_score, current_score, failures, training_sample_count, goal
+            if not tool_calls:
+                # Model answered without tools — accept a legacy single-shot JSON plan.
+                content = (msg.content or "").strip()
+                if content:
+                    return _parse_plan(content), False
+                break
+
+            assistant_tool_calls = []
+            parsed_calls = []
+            for tc in tool_calls:
+                try:
+                    args = json.loads(tc.function.arguments or "{}")
+                except json.JSONDecodeError as exc:
+                    finish = getattr(choice, "finish_reason", "")
+                    raise MiniMaxPlanError(
+                        f"MiniMax returned invalid JSON for {tc.function.name} "
+                        f"(finish_reason={finish})"
+                    ) from exc
+                assistant_tool_calls.append(
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments,
+                        },
+                    }
+                )
+                parsed_calls.append((tc, args))
+
+            messages.append({
+                "role": "assistant",
+                "content": msg.content or "",
+                "tool_calls": assistant_tool_calls,
+            })
+
+            done = False
+            for tc, args in parsed_calls:
+                name = tc.function.name
+
+                if name == "create_evals":
+                    criteria = [str(c) for c in args.get("criteria", [])][:10]
+                    result = f"Recorded {len(criteria)} eval criteria."
+                elif name == "add_training_examples":
+                    accepted, rationale = extract_training_payload(args)
+                    examples.extend(accepted)
+                    if rationale:
+                        rationale_bits.append(rationale)
+                    remaining = (
+                        max(training_sample_count - len(examples), 0)
+                        if training_sample_count is not None
+                        else "agent choice"
+                    )
+                    result = (
+                        f"Accepted {len(accepted)} examples ({len(examples)} total). "
+                        f"Remaining requested examples: {remaining}. "
+                        f"Continue with at most {example_batch_size} examples per call."
+                    )
+                elif name == "start_training_model":
+                    hyperparams = coerce_hyperparams(args)
+                    result = f"Training launched with {hyperparams}."
+                    done = True
+                else:
+                    result = f"Unknown tool {name!r} ignored."
+
+                messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
+
+            if done:
+                break
+
+        if hyperparams is None or not examples:
+            raise MiniMaxPlanError("agent did not produce a complete tool-driven plan")
+
+        plan = _assemble_plan(
+            iteration, hyperparams, examples, criteria, rationale_bits, training_sample_count
         )
-        return fallback, True
+        return plan, False
 
     async def generate_evals(self, goal: str, count: int = 5) -> list[dict]:
         """Have MiniMax CALL the create_evals tool to produce an objective eval set.
@@ -266,7 +341,7 @@ class MiniMaxPlanner:
                 tools=create_evals_tools,
                 tool_choice={"type": "function", "function": {"name": "create_evals"}},
                 temperature=0.2,
-                max_tokens=2000,
+                max_tokens=MINIMAX_EVAL_MAX_TOKENS,
             )
             tool_calls = resp.choices[0].message.tool_calls or []
             args = json.loads(tool_calls[0].function.arguments or "{}") if tool_calls else {}

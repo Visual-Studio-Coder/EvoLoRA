@@ -549,7 +549,9 @@ class EvoLoRAApp(App[None]):
             return
 
         if kind == EventKind.AGENT_FALLBACK_USED:
-            self._agent_log().write("[red][!][/] MiniMax unavailable; using heuristic fallback")
+            reason = str(data.get("reason", "")).strip()
+            detail = f": {reason}" if reason else ""
+            self._agent_log().write(f"[red][!][/] MiniMax unavailable; using heuristic fallback{detail}")
             return
 
         if kind == EventKind.EVAL_APPROVAL_REQUIRED:
