@@ -1,9 +1,13 @@
+# Unsloth MUST be imported before trl/transformers/peft/datasets so its patches to the
+# tokenization pipeline apply. Otherwise datasets tries to dill-pickle the map function and
+# hits unsloth's torch-config object -> "cannot pickle 'ConfigModuleInstance'".
+from unsloth import FastLanguageModel  # isort: skip  # noqa: E402
+
 import json
 
 import torch
 from datasets import load_dataset
 from trl import SFTConfig, SFTTrainer
-from unsloth import FastLanguageModel
 
 # ====================== LOAD CONFIG ======================
 with open("config.json") as f:
@@ -76,6 +80,10 @@ training_args = SFTConfig(
     save_strategy="no",
     dataset_text_field="text",
     max_length=max_seq_length,
+    # Single-process tokenization: trl's default num_proc=30 forks workers that must
+    # pickle the map fn + module globals, which include unsloth's patched torch config
+    # (ConfigModuleInstance) — unpicklable -> crash. num_proc=1 keeps it in-process.
+    dataset_num_proc=1,
 )
 
 trainer = SFTTrainer(
