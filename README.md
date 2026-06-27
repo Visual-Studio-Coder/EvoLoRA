@@ -1,53 +1,62 @@
-EvoLoRA uses a MiniMax agent to train Phi-3-mini-128k-instruct so it gets better at one focused job. It turns that learning process into a visible loop where the agent plans, Phi trains, results are scored, and the best version is kept.
+EvoLoRA uses a MiniMax agent to train Phi-3-mini-128k-instruct so it gets better at one focused job. It makes the whole learning process visible: the agent plans, Phi trains, results are scored, and the best version is kept.
 
 # EvoLoRA
 
-EvoLoRA is an auditable self-improvement loop for specializing Phi-3-mini-128k-instruct with LoRA. The demo starts with a task, measures how well Phi performs, asks MiniMax to plan better training examples and LoRA settings, runs a training backend, evaluates the result against a locked benchmark, and keeps the best result.
+EvoLoRA is a hackathon project for building an auditable, bounded self-improvement loop around LoRA fine-tuning. The current demo specializes `microsoft/Phi-3-mini-128k-instruct` for structured customer spending summaries that must return strict JSON.
 
 Design sketch: https://excalidraw.com/#room=eb97987f23a5b8e55daa,sGaQZ17EchEOWLst6Xxo0Q
 
-The current demo task is a structured customer spending summary. The model must read customer purchase data and return strict JSON with fields like top customer, total revenue, customer count, and a short summary.
+## Hackathon Fit
 
-## Why It Exists
+- Event: 2026 AI Engineer World's Fair Hackathon.
+- Theme: Recursive Intelligence + The Self-Improvement Stack.
+- Core claim: a bounded agent loop can propose LoRA training data, choose hyperparameters, train/evaluate an adapter, judge the result, and decide whether another iteration is worth user approval.
+- Judge packet: [submission guide](docs/HACKATHON_SUBMISSION.md), [architecture](docs/ARCHITECTURE.md), and [video plan](docs/VIDEO_PLAN.md).
+- Contribution boundary: this repo highlights the features built for the hackathon and labels mock/fallback/real integrations explicitly.
 
-Self-improving AI systems are easy to pitch and hard to trust. EvoLoRA narrows the idea into one concrete workflow: MiniMax acts as the training strategist, Phi-3-mini-128k-instruct is the model being specialized, and Python keeps the loop bounded and inspectable.
+## What It Does
 
-EvoLoRA makes the loop visible:
+- MiniMax acts as the training strategist.
+- Phi-3-mini-128k-instruct is the model being specialized.
+- Python validates every plan before training starts.
+- The eval set is locked and hashed before scoring.
+- The mock backend runs with no API keys, no GPU, and no external services.
+- Optional live services are clearly labeled when used: MiniMax planning, DigitalOcean judging, MongoDB persistence, and future GPU training.
 
-- every run has a clear starting score
-- every improvement attempt has a plan
-- training data and LoRA settings are validated before use
-- evaluation happens against a locked benchmark
-- DigitalOcean can review the trained adapter as an LLM judge, then MiniMax decides whether another iteration is worth asking the user for
-- fallback mode works with no API keys
-- the loop stops for explicit reasons: target score, max iterations, patience, judge acceptance, user-declined retrain, cancellation, eval tampering, or failure
+## How The Loop Works
 
-## Demo Flow
+1. Start with a specialization goal or the built-in customer spending demo.
+2. Lock the objective eval set and record its hash.
+3. Run a baseline score.
+4. Ask MiniMax to plan eval criteria, training examples, and LoRA settings.
+5. Fall back to a heuristic planner when MiniMax is not configured.
+6. Validate training examples and snap LoRA settings to safe allowed values.
+7. Train through the selected backend, using the mock backend by default.
+8. Score the result against the locked eval set.
+9. Run the DigitalOcean judge when configured, or use a labeled heuristic judge.
+10. Ask MiniMax whether another retraining round is worth doing.
+11. Preserve the best result and stop when the loop reaches a target score, max iterations, patience, judge acceptance, user decline, cancellation, eval tampering, or failure.
 
-1. Lock the evaluation set and record its hash.
-2. Run a baseline score.
-3. Ask MiniMax for a training plan, or use the heuristic planner when no key is available.
-4. Validate the generated training examples and LoRA hyperparameters.
-5. Train Phi-3-mini-128k-instruct with the mock backend by default.
-6. Evaluate the adapter on the locked benchmark.
-7. Run a DigitalOcean LLM judge when `DIGITAL_OCEAN_MODEL_ACCESS_KEY` is set; otherwise use a labeled heuristic judge.
-8. Send the judge rating and summary to MiniMax for a retrain/stop recommendation.
-9. In the TUI, ask the user before retraining when MiniMax recommends another round.
-10. Preserve the best result and repeat until a stop condition is reached.
+## Built Pieces
 
-## What Is Built
-
-- `evolora demo`: plain CLI demo run
-- `evolora tui`: live Textual interface with agent reasoning, training examples, LoRA config, metrics, and start/cancel controls
-- `evolora doctor`: environment check for keys, persistence, and backend mode
-- `evolora smoke-minimax`: MiniMax connectivity check when `MINIMAX_API_KEY` is set
-- Mock training backend that simulates Phi specialization locally with no GPU
-- MiniMax planner through the OpenAI SDK, with heuristic fallback
-- DigitalOcean judge through the OpenAI-compatible Inference endpoint, with heuristic fallback
-- MiniMax retrain decision after the judge report, with user approval controls in the TUI
-- Locked evaluation set and objective JSON scorer
-- In-memory run store and local artifact store
-- Optional exact training sample count; blank means the planner chooses, a number means Python enforces that count
+- `evolora demo`: command-line demo loop
+- `evolora tui`: Textual interface for live runs
+- `evolora doctor`: environment and mode check
+- `evolora smoke-minimax`: MiniMax connectivity smoke test
+- MiniMax tool-calling planner with three bounded tools:
+  - `create_evals`
+  - `add_training_examples`
+  - `start_training_model`
+- Heuristic planner fallback for no-key runs
+- Mock training backend and mock model runner
+- Optional `unsloth` and `remote` backend boundaries
+- Locked objective evaluator for strict JSON outputs
+- DigitalOcean LLM judge with heuristic fallback
+- MiniMax retrain advisor with heuristic fallback
+- MongoDB run persistence with in-memory fallback
+- Remote GPU config push and VM result pull over SSH/SFTP
+- Local artifact store under ignored `artifacts/`
+- Pytest coverage for planner, tools, evaluation, persistence, orchestration, models, and TUI behavior
 
 ## Quick Start
 
@@ -60,72 +69,79 @@ uv run evolora demo --mock --iterations 2
 uv run evolora tui
 ```
 
-Mock mode is the default. You can run the core demo without `.env`, external services, or a GPU.
+Mock mode is the default path. It is meant to work without `.env`, API keys, MongoDB, or a GPU.
 
 ## Useful Commands
 
-```powershell
-# Run the mock CLI demo
-uv run evolora demo --mock --iterations 2
+| Command | Purpose |
+| --- | --- |
+| `uv run evolora` | Launch the TUI by default |
+| `uv run evolora tui` | Launch the Textual interface |
+| `uv run evolora demo --mock --iterations 2` | Run a short mock demo |
+| `uv run evolora doctor` | Check local configuration |
+| `uv run evolora smoke-minimax` | Test MiniMax when `MINIMAX_API_KEY` is set |
+| `uv run pytest` | Run the test suite |
+| `uv run ruff check .` | Run lint checks |
 
-# Launch the terminal UI
-uv run evolora tui
+## Configuration
 
-# Check local configuration
-uv run evolora doctor
+Secrets stay in `.env`, which is ignored by Git. Create it locally using the variables below when live services are needed.
 
-# Test MiniMax only when a real key is present
-uv run evolora smoke-minimax
+| Variable | Purpose |
+| --- | --- |
+| `BASE_MODEL_ID` | Defaults to `microsoft/Phi-3-mini-128k-instruct` |
+| `MINIMAX_API_KEY` | Enables live MiniMax planning and retrain advice |
+| `MINIMAX_MODEL` | Defaults to `MiniMax-M2.7-highspeed` |
+| `MINIMAX_BASE_URL` | Defaults to `https://api.minimax.io/v1` |
+| `DIGITAL_OCEAN_MODEL_ACCESS_KEY` | Enables the real DigitalOcean judge |
+| `DIGITAL_OCEAN_INFERENCE_BASE_URL` | Defaults to `https://inference.do-ai.run/v1/` |
+| `DIGITAL_OCEAN_JUDGE_MODEL` | Defaults to `llama3.3-70b-instruct` |
+| `MONGODB_URI` | Enables MongoDB Atlas run persistence |
+| `MONGODB_DB_NAME` | Defaults to `evolora` |
+| `MONGODB_RUNS_COLLECTION` | Defaults to `runs` |
+| `MONGODB_SERVER_SELECTION_TIMEOUT_MS` | Defaults to `3000` |
+| `TRAINING_BACKEND` | `mock` by default; optional paths are `unsloth` and `remote` |
+| `MODEL_RUNNER` | `mock` by default; `vm`/`remote` reads VM eval outputs |
+| `SSH_HOST`, `SSH_USER`, `SSH_PORT`, `SSH_KEY_PATH` | Enables remote VM SFTP config/result exchange |
+| `REMOTE_CONFIG_PATH` | Where EvoLoRA writes the VM config JSON |
+| `REMOTE_RESULTS_PATH` | Where the VM writes eval outputs for EvoLoRA to score |
+| `MAX_ITERATIONS` | Max training loop iterations |
+| `TARGET_SCORE` | Score target for stopping |
+| `IMPROVEMENT_THRESHOLD` | Minimum improvement before patience counts down |
+| `PATIENCE` | Stop after repeated low-improvement iterations |
 
-# Run tests and lint
-uv run pytest
-uv run ruff check .
-```
-
-## Environment
-
-Secrets stay in `.env`, which is ignored by Git. Use `.env.example` for the expected variable names.
-
-Key variables:
-
-- `MINIMAX_API_KEY`: enables live MiniMax planning
-- `MINIMAX_MODEL`: defaults to `MiniMax-M2.7-highspeed`
-- `MINIMAX_BASE_URL`: defaults to `https://api.minimax.io/v1`
-- `DIGITAL_OCEAN_MODEL_ACCESS_KEY`: enables the real DigitalOcean judge
-- `DIGITAL_OCEAN_INFERENCE_BASE_URL`: defaults to `https://inference.do-ai.run/v1/`
-- `DIGITAL_OCEAN_JUDGE_MODEL`: defaults to `llama3.3-70b-instruct`
-- `BASE_MODEL_ID`: defaults to `microsoft/Phi-3-mini-128k-instruct`
-- `MONGODB_URI`: enables MongoDB Atlas run persistence
-- `MONGODB_DB_NAME`: defaults to `evolora`
-- `MONGODB_RUNS_COLLECTION`: defaults to `runs`
-- `MONGODB_SERVER_SELECTION_TIMEOUT_MS`: defaults to `3000`
-- `TRAINING_BACKEND`: `mock` by default; `unsloth` and `remote` are optional paths
-- `MODEL_RUNNER`: `mock` by default
-- `MAX_ITERATIONS`, `TARGET_SCORE`, `IMPROVEMENT_THRESHOLD`, `PATIENCE`: loop controls
-
-## Project Layout
+## Repo Layout
 
 ```text
 src/evolora/
-  cli.py              Typer commands
+  cli.py              Typer command entrypoint
   config.py           Environment-backed configuration
-  agent/              MiniMax planner and heuristic fallback
-  orchestration/      Run loop, events, stop conditions, cancellation
-  evaluation/         Locked benchmark and objective scoring
-  training/           Mock backend and real-backend boundaries
-  persistence/        Run records and artifact storage
-  tui/                Textual live interface
-  demo/               Customer spending demo data
+  agent/              MiniMax planner, tool schemas, heuristic fallback
+  demo/               Customer spending demo task and evals
+  evaluation/         Locked eval scoring and DigitalOcean judge
+  inference/          Inference package boundary
+  models/             Pydantic run, plan, event, and result models
+  orchestration/      Main loop, stop conditions, approval, retrain advice
+  persistence/        In-memory store, MongoDB store, local artifacts
+  training/           Mock backend plus real-backend boundaries
+  tui/                Native Textual app
 tests/                Unit and integration tests
-docs/                 Durable project notes
-scripts/              Optional helper scripts
-artifacts/            Ignored runtime outputs
+docs/                 Submission, architecture, and demo-video guide
+artifacts/            Runtime outputs, ignored by Git
 ```
 
-## Boundaries
+## Safety Boundaries
 
-Mock mode is real and supported. Live MiniMax planning and live DigitalOcean judging are optional. When the DigitalOcean model access key is missing or the call fails, EvoLoRA labels the judge result as a heuristic fallback. When `MONGODB_URI` is configured, each run is upserted into MongoDB with `run_id` as `_id`; every iteration's hyperparameters and LLM-as-judge report are also copied into query-friendly `hyperparams_by_iteration` and `judge_reports` arrays linked by the same `run_id`. If MongoDB is unreachable, the run falls back to in-memory storage so demos keep working. Real Unsloth or remote GPU training should stay clearly labeled until it is smoke-tested. Do not commit `.env`, generated adapters, checkpoints, or secrets.
+- Never commit `.env`, generated adapters, checkpoints, or secrets.
+- Mock mode must stay functional with no API keys.
+- MiniMax can suggest plans, but Python validates data and hyperparameters.
+- MiniMax cannot pick arbitrary model IDs or write arbitrary files.
+- DigitalOcean judge failures fall back to a labeled heuristic judge.
+- MongoDB failures fall back to in-memory persistence.
+- Real Unsloth or remote GPU training should stay clearly labeled until smoke-tested.
 
 ## Current Status
 
-The P0 path is the focus: mock end-to-end loop for MiniMax-guided Phi specialization, locked evaluation, planner fallback, validated examples and hyperparameters, TUI progress, cancellation, and CLI fallback. P1 items such as real GPU training, richer run history, and deployment polish should come after the mock loop stays stable.
+The main path is the mock end-to-end loop: MiniMax-guided Phi specialization, locked evaluation, planner fallback, validated examples and hyperparameters, TUI progress, cancellation, user-approved retraining, and CLI fallback.
+
+Next useful work is real training and stronger run history: smoke-tested Unsloth or remote GPU training, artifact checksums for real adapters, richer MongoDB history views, and polished demo docs.

@@ -37,8 +37,10 @@ def build_training_config_payload(
     run_config: RunConfig,
     plan: AgentPlan,
     eval_set: LockedEvalSet,
+    remote_results_path: str | None = None,
 ) -> dict[str, Any]:
     """Build the JSON payload consumed by the remote GPU trainer."""
+    cfg = get_config()
     examples = copy.deepcopy(plan.data_spec.examples)
     return {
         "schema_version": 1,
@@ -55,9 +57,11 @@ def build_training_config_payload(
         "training_example_count": len(examples),
         "training_data_rationale": plan.data_spec.rationale,
         "focus_areas": list(plan.focus_areas),
+        "remote_results_path": remote_results_path or cfg.remote_results_path,
+        "eval_prompts": eval_set.prompts_only(),
         "eval_set": {
             "hash": eval_set.hash,
-            "samples": [sample.model_dump(mode="json") for sample in eval_set.samples],
+            "prompt_count": len(eval_set),
         },
     }
 

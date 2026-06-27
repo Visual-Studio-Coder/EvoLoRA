@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from evolora.demo.task import LOCKED_EVAL_SET
@@ -38,6 +40,7 @@ def test_build_training_config_payload_includes_gpu_inputs() -> None:
         run_config=cfg,
         plan=_plan(),
         eval_set=LOCKED_EVAL_SET,
+        remote_results_path="~/evolora/results.json",
     )
 
     assert payload["run_id"] == "run-1"
@@ -45,8 +48,11 @@ def test_build_training_config_payload_includes_gpu_inputs() -> None:
     assert payload["training_backend"] == "remote"
     assert payload["hyperparameters"]["r"] == 16
     assert payload["training_examples"][0]["prompt"] == "p"
+    assert payload["remote_results_path"] == "~/evolora/results.json"
     assert payload["eval_set"]["hash"] == LOCKED_EVAL_SET.hash
-    assert payload["eval_set"]["samples"]
+    assert payload["eval_set"]["prompt_count"] == len(LOCKED_EVAL_SET)
+    assert payload["eval_prompts"]
+    assert "expected" not in json.dumps(payload["eval_prompts"])
 
 
 def test_push_config_dry_run_when_ssh_is_unset() -> None:
@@ -179,7 +185,9 @@ async def test_orchestrator_pushes_remote_config_before_training(monkeypatch) ->
     assert captured["config"]["run_id"] == cfg.run_id
     assert captured["config"]["training_backend"] == "remote"
     assert captured["config"]["training_examples"]
+    assert captured["config"]["eval_prompts"]
     assert captured["config"]["eval_set"]["hash"] == LOCKED_EVAL_SET.hash
+    assert "expected" not in json.dumps(captured["config"]["eval_prompts"])
     assert any(
         event.kind == EventKind.LOG and "Remote config dry-run" in event.message
         for event in events

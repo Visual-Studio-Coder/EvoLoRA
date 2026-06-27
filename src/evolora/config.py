@@ -29,6 +29,7 @@ class Config(BaseModel):
     ssh_port: int = Field(default=22)
     ssh_key_path: str = Field(default="")
     remote_config_path: str = Field(default="~/evolora/config.json")
+    remote_results_path: str = Field(default="~/evolora/results.json")
 
     # Persistence
     mongodb_uri: str = Field(default="")
@@ -83,6 +84,7 @@ def get_config() -> Config:
         ssh_port=int(os.getenv("SSH_PORT", "22")),
         ssh_key_path=os.getenv("SSH_KEY_PATH", ""),
         remote_config_path=os.getenv("REMOTE_CONFIG_PATH", "~/evolora/config.json"),
+        remote_results_path=os.getenv("REMOTE_RESULTS_PATH", "~/evolora/results.json"),
         mongodb_uri=os.getenv("MONGODB_URI", ""),
         mongodb_db_name=os.getenv("MONGODB_DB_NAME", "evolora"),
         mongodb_runs_collection=os.getenv("MONGODB_RUNS_COLLECTION", "runs"),
