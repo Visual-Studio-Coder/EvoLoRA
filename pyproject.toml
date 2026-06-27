@@ -53,6 +53,8 @@ pythonpath = ["src"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# GPU-target scripts run on the VM with unsloth — not part of the package/wheel, linted there.
+extend-exclude = ["src/virtual_machine_code"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
