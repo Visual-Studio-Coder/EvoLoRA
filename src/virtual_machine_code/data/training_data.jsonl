@@ -1,0 +1,3 @@
+{"instruction": "Generate valid SQL for the following question.", "input": "List all customers who live in New York.", "output": "SELECT * FROM customers WHERE city = 'New York';"}
+{"instruction": "Generate valid SQL for the following question.", "input": "Show the total amount spent by each customer.", "output": "SELECT name, SUM(amount) AS total_spent FROM customers INNER JOIN orders ON customers.id = orders.customer_id GROUP BY customers.id;"}
+{"instruction": "Generate valid SQL for the following question.", "input": "Find the customer who placed the most orders.", "output": "SELECT name FROM customers INNER JOIN orders ON customers.id = orders.customer_id GROUP BY customers.id ORDER BY COUNT(*) DESC LIMIT 1;"}
