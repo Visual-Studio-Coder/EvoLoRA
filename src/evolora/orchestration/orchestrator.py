@@ -6,12 +6,13 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
 from evolora.agent.planner import HeuristicPlanner, MiniMaxPlanner
-from evolora.evaluation.evaluator import ObjectiveEvaluator
+from evolora.evaluation.evaluator import GenericEvaluator, ObjectiveEvaluator
 from evolora.evaluation.locked import LockedEvalSet
 from evolora.models.core import (
     AgentPlan,
     ArtifactMeta,
     EvalResult,
+    EvalSample,
     IterationResult,
     RunConfig,
     RunRecord,
@@ -74,6 +75,26 @@ class Orchestrator:
         rec.status = RunStatus.PREPARING
         yield await emit(EventKind.RUN_STARTED, "EvoLoRA run started", mock=self._backend.is_mock)
         await self._store.save(rec)
+
+        # --- MINIMAX-GENERATED EVALS (goal-driven) ---
+        # When the user supplied a goal and the agent can generate evals, MiniMax
+        # produces a goal-specific objective eval set; we score it with the generic
+        # evaluator and skip the demo adaptive set (which is customer-spending).
+        if rec.config.goal and isinstance(self._planner, MiniMaxPlanner):
+            yield await emit(EventKind.STATUS_CHANGED, f"MiniMax generating evals for goal: {rec.config.goal[:60]}")
+            try:
+                generated = await self._planner.generate_evals(rec.config.goal)
+                if generated:
+                    samples = [
+                        EvalSample(sample_id=f"gen-{i + 1:03d}", prompt=g["prompt"], expected=g["expected"])
+                        for i, g in enumerate(generated)
+                    ]
+                    self._eval_set = LockedEvalSet(samples)
+                    self._evaluator = GenericEvaluator()
+                    self._adaptive_set = None
+                    yield await emit(EventKind.LOG, f"MiniMax generated {len(samples)} goal-specific eval examples")
+            except Exception as exc:  # pragma: no cover - defensive; fall back to default eval set
+                yield await emit(EventKind.LOG, f"Eval generation failed, using default eval set ({exc})")
 
         # --- LOCK EVAL SET ---
         rec.status = RunStatus.LOCKING_EVAL

@@ -28,18 +28,29 @@ calling these tools, in order:
      (call exactly once, last).
 Keep training data focused and de-duplicated. After start_training_model is called, stop."""
 
+_EVAL_GEN_SYSTEM = """You generate a small, objective evaluation set for fine-tuning a model on
+the user's task. Output ONLY a JSON array (no markdown, no prose). Each item must be
+{"prompt": "<the input the model receives>", "expected": {<the exact correct JSON object the
+model should output>}}. Make every "expected" an object with concrete, automatically checkable
+field values. Keep prompts varied, realistic, and unambiguous."""
+
 
 def _strip_think(text: str) -> str:
     """Remove <think>...</think> blocks that some models emit."""
     return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
 
-def _parse_plan(raw: str) -> AgentPlan:
+def _extract_json(raw: str):
+    """Strip think-blocks and markdown fences, then parse JSON (list or object)."""
     text = _strip_think(raw)
     if text.startswith("```"):
         lines = text.splitlines()
         text = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
-    data: dict[str, Any] = json.loads(text)
+    return json.loads(text)
+
+
+def _parse_plan(raw: str) -> AgentPlan:
+    data: dict[str, Any] = _extract_json(raw)
     return AgentPlan(**data)
 
 
@@ -230,6 +241,47 @@ class MiniMaxPlanner:
             iteration, baseline_score, current_score, failures, training_sample_count, goal
         )
         return fallback, True
+
+    async def generate_evals(self, goal: str, count: int = 5) -> list[dict]:
+        """Ask MiniMax to generate an objective eval set for the goal.
+
+        Returns a list of {"prompt": str, "expected": dict}. Returns [] on any
+        failure so the orchestrator can fall back to its default eval set.
+        """
+        client = self._make_client()
+        user_prompt = json.dumps({
+            "goal": goal,
+            "count": count,
+            "instruction": (
+                f"Generate exactly {count} evaluation examples for this goal. Each 'expected' "
+                "must be the single correct JSON output for its prompt, with concrete values."
+            ),
+        })
+        try:
+            resp = await client.chat.completions.create(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": _EVAL_GEN_SYSTEM},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.2,
+                max_tokens=2000,
+            )
+            data = _extract_json(resp.choices[0].message.content or "")
+        except Exception:
+            return []
+
+        evals: list[dict] = []
+        for item in data if isinstance(data, list) else []:
+            if not isinstance(item, dict):
+                continue
+            prompt = item.get("prompt")
+            expected = item.get("expected")
+            if prompt and isinstance(expected, dict):
+                evals.append({"prompt": str(prompt), "expected": expected})
+            if len(evals) >= count:
+                break
+        return evals
 
 
 class HeuristicPlanner:
