@@ -1,18 +1,16 @@
-"""LLM-as-a-judge evaluation over the canonical evals.json record format.
+"""LLM-as-a-judge evaluation over the canonical evals.json format.
 
-A canonical eval record (the shape pushed to / returned from the VM):
+The agent generates ``evals.json`` as a list of 2-field records:
 
-    {
-      "input": str,            # the prompt/question given to the model
-      "expected_output": str,  # the ground-truth reference answer
-      "actual_output": str,    # starts empty, filled by the finetuned model during eval
-      "score": int | None,     # starts null, filled by the LLM-as-a-judge (0-10)
-      "reason": str            # starts empty, filled by the judge to explain the score
-    }
+    [ { "input": "<question>", "expected": "<expected output>" }, ... ]
 
-The agent generates ``input`` + ``expected_output``; the VM runs the adapter and fills
-``actual_output``; ``LLMJudgeEvaluator`` fills ``score`` (0-10) and ``reason`` using a
-DigitalOcean inference model. The filled records can then be persisted (e.g. MongoDB).
+At eval time each record is augmented to:
+
+    { "input": ..., "expected": ..., "actual": "<model output>", "score": <0-10>, "reason": "..." }
+
+``actual`` is filled by the finetuned model (on the VM); ``LLMJudgeEvaluator`` fills
+``score`` (0-10, how well actual matches expected) and ``reason``. The filled records can
+then be persisted (e.g. MongoDB).
 """
 
 from __future__ import annotations
@@ -22,31 +20,22 @@ import json
 import re
 from typing import Any
 
-EVAL_FIELDS = ("input", "expected_output", "actual_output", "score", "reason")
-
 
 def make_eval_records(items: list[dict]) -> list[dict]:
-    """Build canonical eval records from generated evals.
+    """Build the generated evals.json shape: ``[{input, expected}]``.
 
-    Accepts the agent's ``{input|prompt, expected_output|expected}`` shape (expected may be a
-    dict/list — it is JSON-stringified) and returns records with empty
-    ``actual_output``/``score``/``reason`` ready to write to ``evals.json``.
+    Accepts the agent's ``{input|prompt, expected|expected_output}`` and returns just the two
+    file fields (dict/list expecteds are JSON-stringified).
     """
     records: list[dict] = []
     for item in items:
         if not isinstance(item, dict):
             continue
         inp = item.get("input", item.get("prompt", ""))
-        exp = item.get("expected_output", item.get("expected", ""))
+        exp = item.get("expected", item.get("expected_output", ""))
         if isinstance(exp, (dict, list)):
             exp = json.dumps(exp, sort_keys=True)
-        records.append({
-            "input": str(inp),
-            "expected_output": str(exp),
-            "actual_output": str(item.get("actual_output", "") or ""),
-            "score": item.get("score"),
-            "reason": str(item.get("reason", "") or ""),
-        })
+        records.append({"input": str(inp), "expected": str(exp)})
     return records
 
 
@@ -109,10 +98,10 @@ class LLMJudgeEvaluator:
         return AsyncOpenAI(api_key=self._api_key, base_url=self._base_url)
 
     async def judge(self, records: list[dict]) -> tuple[float, list[dict]]:
-        """Score each record. Returns (aggregate_score_0to1, filled_records).
+        """Score each record (reads input/expected/actual). Returns (aggregate_0to1, records).
 
-        Records missing ``actual_output`` score 0. If the judge is unconfigured the records
-        are returned unchanged with a 0.0 aggregate (caller can fall back).
+        Records with an empty ``actual`` score 0. Unconfigured -> records returned unchanged
+        with a 0.0 aggregate so the caller can fall back.
         """
         if not records:
             return 0.0, []
@@ -124,7 +113,7 @@ class LLMJudgeEvaluator:
 
         async def score_one(record: dict) -> dict:
             filled = dict(record)
-            if not str(filled.get("actual_output", "")).strip():
+            if not str(filled.get("actual", "")).strip():
                 filled["score"] = 0
                 filled["reason"] = "no model output produced"
                 return filled
@@ -134,6 +123,7 @@ class LLMJudgeEvaluator:
                     filled["score"] = score
                     filled["reason"] = reason
                 except Exception as exc:  # pragma: no cover - network/judge failure
+                    filled.setdefault("score", None)
                     filled["reason"] = f"judge error: {exc}"
             return filled
 
@@ -145,8 +135,8 @@ class LLMJudgeEvaluator:
     async def _score(self, client, record: dict) -> tuple[int | None, str]:
         user = json.dumps({
             "input": record.get("input", ""),
-            "expected_output": record.get("expected_output", ""),
-            "actual_output": record.get("actual_output", ""),
+            "expected": record.get("expected", ""),
+            "actual": record.get("actual", ""),
         })
         resp = await client.chat.completions.create(
             model=self._model,
