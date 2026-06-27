@@ -242,6 +242,7 @@ class EvoLoRAApp(App[None]):
         self._best = 0.0
         self._current = 0.0
         self._requested_sample_count: int | None = 30
+        self._goal = ""
 
     def compose(self) -> ComposeResult:
         with Container(id="frame"):
@@ -333,6 +334,7 @@ class EvoLoRAApp(App[None]):
             return
 
         self._requested_sample_count = sample_count
+        self._goal = self.query_one("#goal-input", Input).value.strip()
         self._update_config_panel()
         self._run_active = True
         self._loss_values.clear()
@@ -343,6 +345,8 @@ class EvoLoRAApp(App[None]):
         self.query_one("#cancel-button", Button).disabled = False
         self._agent_log().clear()
         self._examples_log().clear()
+        if self._goal:
+            self._agent_log().write(f"[bright_green][>][/] Use case sent to agent: [bold]{self._goal}[/]")
         sample_label = (
             f"exactly {sample_count} training samples"
             if sample_count is not None
@@ -369,6 +373,7 @@ class EvoLoRAApp(App[None]):
             model_runner=cfg.model_runner,
             base_model_id=cfg.base_model_id,
             training_sample_count=self._requested_sample_count,
+            goal=self._goal,
         )
 
         backend = get_backend(cfg.training_backend)

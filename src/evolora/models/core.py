@@ -164,6 +164,7 @@ class IterationResult(BaseModel):
 class RunConfig(BaseModel):
     run_id: str = Field(default_factory=_run_id)
     task_name: str = Field(default="customer_spending_summary")
+    goal: str = Field(default="")  # user's stated use case from the TUI/CLI, sent to the planner
     max_iterations: int = Field(default=3, ge=1, le=20)
     target_score: float = Field(default=0.85, ge=0.0, le=1.0)
     improvement_threshold: float = Field(default=0.01, ge=0.0)

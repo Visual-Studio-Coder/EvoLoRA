@@ -108,6 +108,7 @@ class Orchestrator:
                 prev_score,
                 failures,
                 rec.config.training_sample_count,
+                rec.config.goal,
             )
 
             if fallback:
@@ -250,6 +251,7 @@ class Orchestrator:
         current_score,
         failures,
         training_sample_count: int | None,
+        goal: str = "",
     ):
         if isinstance(self._planner, MiniMaxPlanner):
             return await self._planner.plan(
@@ -258,6 +260,7 @@ class Orchestrator:
                 current_score,
                 failures,
                 training_sample_count,
+                goal,
             )
         return (
             self._planner.plan(
@@ -266,6 +269,7 @@ class Orchestrator:
                 current_score,
                 failures,
                 training_sample_count,
+                goal,
             ),
             False,
         )
