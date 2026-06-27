@@ -137,3 +137,84 @@ class ObjectiveEvaluator:
         results = [evaluate_sample(s, responses.get(s.sample_id, "")) for s in samples]
         score = sum(r.score for r in results) / len(results) if results else 0.0
         return score, results
+
+
+# ---------------------------------------------------------------------------
+# Generic evaluator — scores against an arbitrary expected JSON object, so
+# MiniMax-generated, goal-specific eval sets can be scored objectively without
+# the customer-spending field assumptions baked into evaluate_sample().
+# ---------------------------------------------------------------------------
+
+
+def _values_match(got: Any, expected: Any) -> bool:
+    if isinstance(expected, bool):
+        return bool(got) == expected
+    if isinstance(expected, (int, float)):
+        try:
+            return _relative_close(float(got), float(expected))
+        except (TypeError, ValueError):
+            return False
+    if isinstance(expected, str):
+        return str(got).strip().lower() == expected.strip().lower()
+    return got == expected
+
+
+def generic_evaluate_sample(sample: EvalSample, raw_response: str) -> EvalResult:
+    """Score a response against an arbitrary expected JSON object (any goal)."""
+    t0 = time.monotonic()
+    text = raw_response.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        text = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+
+    def _fail(msg: str) -> EvalResult:
+        return EvalResult(
+            sample_id=sample.sample_id,
+            score=0.0,
+            passed=False,
+            details={"error": msg},
+            latency_ms=(time.monotonic() - t0) * 1000,
+        )
+
+    if len(text) > MAX_RESPONSE_LENGTH:
+        return _fail(f"response too long ({len(text)} chars)")
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as exc:
+        return _fail(f"invalid JSON: {exc}")
+    if not isinstance(parsed, dict):
+        return _fail("response is not a JSON object")
+
+    expected = sample.expected or {}
+    if not expected:
+        # No ground-truth fields — valid JSON is the only requirement.
+        return EvalResult(
+            sample_id=sample.sample_id,
+            score=1.0,
+            passed=True,
+            details={"note": "valid JSON (no expected fields)"},
+            latency_ms=(time.monotonic() - t0) * 1000,
+        )
+
+    checks = {key: _values_match(parsed.get(key), exp) for key, exp in expected.items()}
+    score = sum(checks.values()) / len(checks)
+    return EvalResult(
+        sample_id=sample.sample_id,
+        score=score,
+        passed=all(checks.values()),
+        details={"checks": checks},
+        latency_ms=(time.monotonic() - t0) * 1000,
+    )
+
+
+class GenericEvaluator:
+    """Score responses against an arbitrary generated eval set (any goal)."""
+
+    def __call__(
+        self,
+        samples: list[EvalSample],
+        responses: dict[str, str],
+    ) -> tuple[float, list[EvalResult]]:
+        results = [generic_evaluate_sample(s, responses.get(s.sample_id, "")) for s in samples]
+        score = sum(r.score for r in results) / len(results) if results else 0.0
+        return score, results
