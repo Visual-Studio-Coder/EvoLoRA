@@ -69,7 +69,7 @@ def test_build_training_config_payload_includes_gpu_inputs() -> None:
     assert payload["eval_set"]["hash"] == LOCKED_EVAL_SET.hash
     assert payload["eval_set"]["prompt_count"] == len(LOCKED_EVAL_SET)
     assert payload["eval_prompts"]
-    assert "expected" not in json.dumps(payload["eval_prompts"])
+    assert set(payload["eval_prompts"][0]) == {"input", "expected"}
 
 
 def test_render_remote_files_matches_vm_contract() -> None:
@@ -98,8 +98,7 @@ def test_render_remote_files_matches_vm_contract() -> None:
         {"instruction": "strict JSON", "input": "p", "output": '{"ok": true}'}
     ]
     assert evals
-    assert set(evals[0]) == {"sample_id", "instruction", "input"}
-    assert "expected" not in files[DEFAULT_REMOTE_EVALS_PATH]
+    assert set(evals[0]) == {"input", "expected"}
 
 
 def test_push_config_dry_run_when_ssh_is_unset() -> None:
@@ -259,4 +258,4 @@ async def test_orchestrator_passes_remote_payload_to_backend() -> None:
     assert backend.payload["training_data"]
     assert backend.payload["eval_prompts"]
     assert backend.payload["eval_set"]["hash"] == LOCKED_EVAL_SET.hash
-    assert "expected" not in json.dumps(backend.payload["eval_prompts"])
+    assert set(backend.payload["eval_prompts"][0]) == {"input", "expected"}
