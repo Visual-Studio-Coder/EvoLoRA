@@ -43,34 +43,40 @@ _STATE_MOOD = {
 
 
 class Mascot(Static):
-    """A little terminal critter that runs back and forth, mirroring the run state."""
+    """A little terminal cat that idles/blinks and reacts to the run state.
 
-    # mood -> (face_right, face_left, caption, moving)
+    Always animated (alive): each mood is a list of frames cycled on a timer; active
+    moods also scamper across the bar. Mirrors the agent via set_mood().
+    """
+
+    # mood -> (animation frames, caption, scampers across the bar)
     MOODS = {
-        "idle": ("('-')", "('-')", "standing by", False),
-        "think": ("('-'?)", "(?'-')", "thinking", True),
-        "run": ("(>'-')>", "<('-'<)", "working", True),
-        "look": ("(o-o)", "(o-o)", "evaluating", True),
-        "happy": ("\\('o')/", "\\('o')/", "done!", False),
-        "sad": ("(._.)", "(._.)", "hmm", False),
+        "idle": (["(=^.^=)", "(=^.^=)", "(=^.^=)", "(=^.^=)", "(=^.^=)", "(=^-^=)"], "purring", False),
+        "think": (["(=o.o=)?", "(=o.o=) ", "(=O.o=)?", "(=o.O=)?"], "thinking", True),
+        "run": (["(=^.^=)", "(=^o^=)"], "chasing", True),
+        "look": (["(=O.O=)", "(=o.o=)", "(=O.O=)", "(=-.-=)"], "watching", True),
+        "happy": (["(=^w^=)", "(=^o^=)"], "yay!", False),
+        "sad": (["(=;_;=)", "(=T_T=)"], "mrrp", False),
     }
 
     def __init__(self, **kwargs) -> None:
         self._mood = "idle"
         self._pos = 0
         self._dir = 1
+        self._anim = 0
         self._track = 16
         super().__init__(self._frame(), **kwargs)
 
     def on_mount(self) -> None:
-        self.set_interval(0.16, self._tick)
+        self.set_interval(0.18, self._tick)
 
     def set_mood(self, mood: str) -> None:
         self._mood = mood if mood in self.MOODS else "idle"
         self.update(self._frame())
 
     def _tick(self) -> None:
-        if self.MOODS[self._mood][3]:  # moving
+        self._anim += 1
+        if self.MOODS[self._mood][2]:  # scampers
             self._pos += self._dir
             if self._pos >= self._track:
                 self._pos, self._dir = self._track, -1
@@ -79,9 +85,9 @@ class Mascot(Static):
         self.update(self._frame())
 
     def _frame(self) -> str:
-        face_right, face_left, caption, _ = self.MOODS[self._mood]
-        face = face_right if self._dir > 0 else face_left
-        cell = ((" " * self._pos) + face).ljust(self._track + 8)
+        frames, caption, _ = self.MOODS[self._mood]
+        face = frames[self._anim % len(frames)]
+        cell = ((" " * self._pos) + face).ljust(self._track + 10)
         return f"[#39ff14]{cell}[/][#005a1c]{caption}[/]"
 
 
