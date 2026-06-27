@@ -1,16 +1,18 @@
-https://excalidraw.com/#room=eb97987f23a5b8e55daa,sGaQZ17EchEOWLst6Xxo0Q
-
-EvoLoRA helps an AI system practice, judge its own work, and improve while people can watch. It is a hackathon demo about making self-improvement feel controlled instead of mysterious.
+EvoLoRA uses a MiniMax agent to train Phi-3-mini-128k-instruct into a model specialized for a chosen task. It turns that improvement process into a visible loop where the agent plans, Phi trains, results are scored, and the best version is kept.
 
 # EvoLoRA
 
-EvoLoRA is an auditable self-improvement loop for small model specialization. The demo starts with a simple task, measures how well the model performs, asks an agent to plan better training examples and LoRA settings, runs a training backend, evaluates the result against a locked benchmark, and keeps the best adapter.
+EvoLoRA is an auditable self-improvement loop for specializing Phi-3-mini-128k-instruct with LoRA. The demo starts with a task, measures how well Phi performs, asks MiniMax to plan better training examples and LoRA settings, runs a training backend, evaluates the result against a locked benchmark, and keeps the best adapter.
+
+Design sketch: https://excalidraw.com/#room=eb97987f23a5b8e55daa,sGaQZ17EchEOWLst6Xxo0Q
 
 The current demo task is a structured customer spending summary. The model must read customer purchase data and return strict JSON with fields like top customer, total revenue, customer count, and a short summary.
 
 ## Why It Exists
 
-Self-improving AI systems are easy to pitch and hard to trust. EvoLoRA makes the loop visible:
+Self-improving AI systems are easy to pitch and hard to trust. EvoLoRA narrows the idea into one concrete workflow: MiniMax acts as the training strategist, Phi-3-mini-128k-instruct is the model being specialized, and Python keeps the loop bounded and inspectable.
+
+EvoLoRA makes the loop visible:
 
 - every run has a clear starting score
 - every improvement attempt has a plan
@@ -25,7 +27,7 @@ Self-improving AI systems are easy to pitch and hard to trust. EvoLoRA makes the
 2. Run a baseline score.
 3. Ask MiniMax for a training plan, or use the heuristic planner when no key is available.
 4. Validate the generated training examples and LoRA hyperparameters.
-5. Train with the mock backend by default.
+5. Train Phi-3-mini-128k-instruct with the mock backend by default.
 6. Evaluate the adapter on the locked benchmark.
 7. Preserve the best result and repeat until a stop condition is reached.
 
@@ -35,7 +37,7 @@ Self-improving AI systems are easy to pitch and hard to trust. EvoLoRA makes the
 - `evolora tui`: live Textual interface with agent reasoning, training examples, LoRA config, metrics, and start/cancel controls
 - `evolora doctor`: environment check for keys, persistence, and backend mode
 - `evolora smoke-minimax`: MiniMax connectivity check when `MINIMAX_API_KEY` is set
-- Mock training backend that runs locally with no GPU
+- Mock training backend that simulates Phi specialization locally with no GPU
 - MiniMax planner through the OpenAI SDK, with heuristic fallback
 - Locked evaluation set and objective JSON scorer
 - In-memory run store and local artifact store
@@ -83,6 +85,7 @@ Key variables:
 - `MINIMAX_API_KEY`: enables live MiniMax planning
 - `MINIMAX_MODEL`: defaults to `MiniMax-M2.7-highspeed`
 - `MINIMAX_BASE_URL`: defaults to `https://api.minimax.io/v1`
+- `BASE_MODEL_ID`: defaults to `microsoft/Phi-3-mini-128k-instruct`
 - `MONGODB_URI`: future persistent run history
 - `TRAINING_BACKEND`: `mock` by default; `unsloth` and `remote` are optional paths
 - `MODEL_RUNNER`: `mock` by default
@@ -113,4 +116,4 @@ Mock mode is real and supported. Live MiniMax planning is optional. Real Unsloth
 
 ## Current Status
 
-The P0 path is the focus: mock end-to-end loop, locked evaluation, planner fallback, validated examples and hyperparameters, TUI progress, cancellation, and CLI fallback. P1 items such as real GPU training, richer run history, and deployment polish should come after the mock loop stays stable.
+The P0 path is the focus: mock end-to-end loop for MiniMax-guided Phi specialization, locked evaluation, planner fallback, validated examples and hyperparameters, TUI progress, cancellation, and CLI fallback. P1 items such as real GPU training, richer run history, and deployment polish should come after the mock loop stays stable.
