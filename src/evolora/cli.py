@@ -55,13 +55,10 @@ def demo(
 async def _demo(mock: bool, iterations: int) -> None:
     import os
 
-    from rich.progress import Progress, SpinnerColumn, TextColumn
-
     from evolora.agent.planner import get_planner
     from evolora.config import get_config
     from evolora.demo.task import ADAPTIVE_EVAL_SET, LOCKED_EVAL_SET
     from evolora.models.core import RunConfig
-    from evolora.models.events import EventKind
     from evolora.orchestration.orchestrator import Orchestrator
     from evolora.training.backends import get_backend
     from evolora.training.runner import get_runner

@@ -14,8 +14,9 @@ load_dotenv()
 class Config(BaseModel):
     # MiniMax
     minimax_api_key: str = Field(default="")
-    minimax_model: str = Field(default="minimax2.7fast")
-    minimax_base_url: str = Field(default="https://api.minimax.io/v1")
+    minimax_model: str = Field(default="MiniMax-M2.7-highspeed")
+    # Anthropic-compatible endpoint (NOT the /v1 OpenAI-compatible one) — used via the Anthropic SDK
+    minimax_base_url: str = Field(default="https://api.minimax.io/anthropic")
     minimax_group_id: str = Field(default="")
 
     # Training
@@ -58,8 +59,8 @@ class Config(BaseModel):
 def get_config() -> Config:
     return Config(
         minimax_api_key=os.getenv("MINIMAX_API_KEY", ""),
-        minimax_model=os.getenv("MINIMAX_MODEL", "minimax2.7fast"),
-        minimax_base_url=os.getenv("MINIMAX_BASE_URL", "https://api.minimax.io/v1"),
+        minimax_model=os.getenv("MINIMAX_MODEL", "MiniMax-M2.7-highspeed"),
+        minimax_base_url=os.getenv("MINIMAX_BASE_URL", "https://api.minimax.io/anthropic"),
         minimax_group_id=os.getenv("MINIMAX_GROUP_ID", ""),
         training_backend=os.getenv("TRAINING_BACKEND", "mock"),
         model_runner=os.getenv("MODEL_RUNNER", "mock"),

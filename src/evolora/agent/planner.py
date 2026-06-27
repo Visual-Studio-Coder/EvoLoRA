@@ -159,9 +159,9 @@ class HeuristicPlanner:
 
 def get_planner(
     use_minimax: bool,
-    api_key: str = "***MINIMAX_KEY_PURGED***",
-    model: str = "minimax2.7fast",
-    base_url: str = "https://api.minimax.io/v1",
+    api_key: str = "",
+    model: str = "MiniMax-M2.7-highspeed",
+    base_url: str = "https://api.minimax.io/anthropic",
 ):
     if use_minimax and api_key:
         return MiniMaxPlanner(api_key=api_key, model=model, base_url=base_url)
