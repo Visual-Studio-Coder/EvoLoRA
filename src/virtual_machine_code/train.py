@@ -44,13 +44,10 @@ dataset = load_dataset("json", data_files=data_file, split="train")
 
 def formatting_prompts_func(examples):
     texts = []
-    for instruction, input_text, output in zip(
-        examples["instruction"], examples["input"], examples["output"]
+    for input_text, output in zip(
+        examples["input"], examples["output"]
     ):
-        text = f"""### Instruction:
-{instruction}
-
-### Input:
+        text = f"""### Input:
 {input_text}
 
 ### Response:
