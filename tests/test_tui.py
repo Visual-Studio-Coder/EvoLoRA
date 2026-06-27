@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -115,3 +116,15 @@ async def test_tui_eval_approval_event_enables_yes_no_buttons() -> None:
         assert app._approval_context == "evals"
         assert app.query_one("#approve-retrain-button", Button).disabled is False
         assert app.query_one("#decline-retrain-button", Button).disabled is False
+
+
+def test_tui_exception_writer_saves_traceback(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(tui_app, "default_log_dir", lambda: tmp_path)
+    app = EvoLoRAApp()
+
+    path = app._write_tui_exception(RuntimeError("giant tui error"))
+
+    assert path
+    assert Path(path).parent == tmp_path
+    text = Path(path).read_text(encoding="utf-8")
+    assert "RuntimeError: giant tui error" in text

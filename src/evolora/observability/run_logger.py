@@ -20,12 +20,30 @@ from pathlib import Path
 from evolora.models.events import Event
 
 
+def _is_project_root(path: Path) -> bool:
+    return (path / "pyproject.toml").exists() or (path / ".git").exists()
+
+
 def _default_log_dir() -> Path:
     override = os.getenv("EVOLORA_LOG_DIR")
     if override:
         return Path(override)
-    # src/evolora/observability/run_logger.py -> parents[3] == repo root (editable install)
-    return Path(__file__).resolve().parents[3] / "logs"
+
+    cwd = Path.cwd()
+    for candidate in (cwd, cwd / "evolora"):
+        if _is_project_root(candidate):
+            return candidate / "logs"
+
+    for parent in Path(__file__).resolve().parents:
+        if _is_project_root(parent):
+            return parent / "logs"
+
+    return cwd / "logs"
+
+
+def default_log_dir() -> Path:
+    """Return the directory where EvoLoRA writes local run logs."""
+    return _default_log_dir()
 
 
 def _auto_enabled() -> bool:
@@ -99,3 +117,8 @@ class RunLogger:
     def path(self) -> Path | None:
         """The JSONL log path (None until the first event is logged)."""
         return self._jsonl
+
+    @property
+    def readable_path(self) -> Path | None:
+        """The human-readable log path (None until the first event is logged)."""
+        return self._txt
