@@ -7,14 +7,21 @@ import json
 import pytest
 
 from evolora.demo.task import LOCKED_EVAL_SET
-from evolora.models.core import AgentPlan, LoraHyperparams, RunConfig, TrainingDataSpec
-from evolora.models.events import EventKind
+from evolora.models.core import (
+    AgentPlan,
+    ArtifactMeta,
+    LoraHyperparams,
+    RunConfig,
+    TrainingDataSpec,
+)
 from evolora.orchestration.orchestrator import Orchestrator
-from evolora.training.backends import MockTrainingBackend
 from evolora.training.remote_config import (
-    RemoteConfigPushResult,
+    DEFAULT_REMOTE_CONFIG_PATH,
+    DEFAULT_REMOTE_EVALS_PATH,
+    DEFAULT_REMOTE_TRAINING_DATA_PATH,
     build_training_config_payload,
     push_config,
+    render_remote_files,
 )
 from evolora.training.runner import MockModelRunner
 
@@ -46,8 +53,18 @@ def test_build_training_config_payload_includes_gpu_inputs() -> None:
     assert payload["run_id"] == "run-1"
     assert payload["iteration"] == 2
     assert payload["training_backend"] == "remote"
-    assert payload["hyperparameters"]["r"] == 16
-    assert payload["training_examples"][0]["prompt"] == "p"
+    assert payload["vm_config"] == {
+        "learning_rate": 1e-4,
+        "lora_rank": 16,
+        "lora_alpha": 32,
+        "num_train_epochs": 1,
+        "per_device_train_batch_size": 4,
+    }
+    assert payload["training_data"][0] == {
+        "instruction": "strict JSON",
+        "input": "p",
+        "output": '{"ok": true}',
+    }
     assert payload["remote_results_path"] == "~/evolora/results.json"
     assert payload["eval_set"]["hash"] == LOCKED_EVAL_SET.hash
     assert payload["eval_set"]["prompt_count"] == len(LOCKED_EVAL_SET)
@@ -55,20 +72,55 @@ def test_build_training_config_payload_includes_gpu_inputs() -> None:
     assert "expected" not in json.dumps(payload["eval_prompts"])
 
 
+def test_render_remote_files_matches_vm_contract() -> None:
+    cfg = RunConfig(run_id="run-1", training_backend="remote", goal="strict JSON")
+    payload = build_training_config_payload(
+        run_id=cfg.run_id,
+        iteration=1,
+        run_config=cfg,
+        plan=_plan(),
+        eval_set=LOCKED_EVAL_SET,
+        remote_results_path="/workspace/generations/results.json",
+    )
+
+    files = render_remote_files(payload, remote_config_path="/workspace/config.json")
+    vm_config = json.loads(files[DEFAULT_REMOTE_CONFIG_PATH])
+    training_rows = [
+        json.loads(line)
+        for line in files[DEFAULT_REMOTE_TRAINING_DATA_PATH].splitlines()
+        if line
+    ]
+    evals = json.loads(files[DEFAULT_REMOTE_EVALS_PATH])
+
+    assert vm_config["lora_rank"] == 16
+    assert "run_id" not in vm_config
+    assert training_rows == [
+        {"instruction": "strict JSON", "input": "p", "output": '{"ok": true}'}
+    ]
+    assert evals
+    assert set(evals[0]) == {"sample_id", "instruction", "input"}
+    assert "expected" not in files[DEFAULT_REMOTE_EVALS_PATH]
+
+
 def test_push_config_dry_run_when_ssh_is_unset() -> None:
     result = push_config(
-        {"run_id": "run-1", "hyperparameters": {"r": 16}},
+        {"vm_config": {"lora_rank": 16}, "training_data": [], "eval_prompts": []},
         ssh_host="",
         ssh_user="",
         ssh_key_path="",
-        remote_config_path="~/evolora/config.json",
+        remote_config_path="/workspace/config.json",
     )
 
     assert result.dry_run is True
     assert result.pushed is False
-    assert result.remote_path == "~/evolora/config.json"
+    assert result.remote_path == "/workspace/config.json"
     assert "SSH_HOST" in result.message
-    assert '"run_id": "run-1"' in result.config_json
+    assert '"lora_rank": 16' in result.config_json
+    assert set(result.files) == {
+        DEFAULT_REMOTE_CONFIG_PATH,
+        DEFAULT_REMOTE_TRAINING_DATA_PATH,
+        DEFAULT_REMOTE_EVALS_PATH,
+    }
 
 
 class FakeRemoteFile:
@@ -89,7 +141,7 @@ class FakeRemoteFile:
 class FakeSFTP:
     def __init__(self) -> None:
         self.files: dict[str, str] = {}
-        self.dirs = {"/", "/home", "/home/tester"}
+        self.dirs = {"/"}
         self.closed = False
 
     def normalize(self, path: str) -> str:
@@ -132,63 +184,79 @@ def test_push_config_writes_json_over_sftp() -> None:
     fake_client = FakeSSHClient()
 
     result = push_config(
-        {"run_id": "run-2", "hyperparameters": {"r": 8}},
+        {"vm_config": {"lora_rank": 8}, "training_data": [], "eval_prompts": []},
         ssh_host="gpu.example.com",
         ssh_user="trainer",
         ssh_port=2222,
         ssh_key_path="C:/Users/emmad/.ssh/evolora",
-        remote_config_path="~/evolora/config.json",
+        remote_config_path="/workspace/config.json",
         ssh_client_factory=lambda: fake_client,
     )
 
     assert result.dry_run is False
     assert result.pushed is True
-    assert result.remote_path == "/home/tester/evolora/config.json"
+    assert result.remote_path == "/workspace/config.json"
     assert fake_client.connect_kwargs["hostname"] == "gpu.example.com"
     assert fake_client.connect_kwargs["username"] == "trainer"
     assert fake_client.connect_kwargs["port"] == 2222
     assert fake_client.connect_kwargs["key_filename"] == "C:/Users/emmad/.ssh/evolora"
-    assert "/home/tester/evolora" in fake_client.sftp.dirs
-    assert '"run_id": "run-2"' in fake_client.sftp.files["/home/tester/evolora/config.json"]
+    assert "/workspace/data" in fake_client.sftp.dirs
+    assert '"lora_rank": 8' in fake_client.sftp.files["/workspace/config.json"]
+    assert "/workspace/data/training_data.jsonl" in fake_client.sftp.files
+    assert "/workspace/data/evals.json" in fake_client.sftp.files
     assert fake_client.sftp.closed is True
     assert fake_client.closed is True
 
 
+class CapturingRemoteBackend:
+    is_mock = False
+    name = "remote"
+
+    def __init__(self) -> None:
+        self.payload: dict | None = None
+
+    async def train(self, run_id, iteration, plan, base_model_id, remote_payload=None):
+        self.payload = remote_payload
+
+        async def stream():
+            yield {
+                "done": True,
+                "artifact": ArtifactMeta(
+                    run_id=run_id,
+                    iteration=iteration,
+                    adapter_path="/workspace/lora_model",
+                    score=0.0,
+                    checksum="remote-test",
+                    is_mock=False,
+                ),
+                "cost_usd": 0.0,
+                "duration_s": 0.0,
+            }
+
+        return stream()
+
+    async def health_check(self) -> bool:
+        return True
+
+
 @pytest.mark.asyncio
-async def test_orchestrator_pushes_remote_config_before_training(monkeypatch) -> None:
-    captured: dict = {}
-
-    def fake_push(config: dict) -> RemoteConfigPushResult:
-        captured["config"] = config
-        return RemoteConfigPushResult(
-            dry_run=True,
-            pushed=False,
-            remote_path="~/evolora/config.json",
-            byte_count=123,
-            message="Remote config dry-run: missing SSH_HOST",
-            config_json="{}",
-        )
-
-    monkeypatch.setattr("evolora.orchestration.orchestrator.push_config", fake_push)
+async def test_orchestrator_passes_remote_payload_to_backend() -> None:
     cfg = RunConfig(max_iterations=1, training_backend="remote", target_score=1.0)
+    backend = CapturingRemoteBackend()
     orch = Orchestrator(
         config=cfg,
         eval_set=LOCKED_EVAL_SET,
-        training_backend=MockTrainingBackend(),
+        training_backend=backend,
         model_runner=MockModelRunner(),
     )
 
-    events = []
-    async for event in await orch.run():
-        events.append(event)
+    async for _ in await orch.run():
+        pass
 
-    assert captured["config"]["run_id"] == cfg.run_id
-    assert captured["config"]["training_backend"] == "remote"
-    assert captured["config"]["training_examples"]
-    assert captured["config"]["eval_prompts"]
-    assert captured["config"]["eval_set"]["hash"] == LOCKED_EVAL_SET.hash
-    assert "expected" not in json.dumps(captured["config"]["eval_prompts"])
-    assert any(
-        event.kind == EventKind.LOG and "Remote config dry-run" in event.message
-        for event in events
-    )
+    assert backend.payload is not None
+    assert backend.payload["run_id"] == cfg.run_id
+    assert backend.payload["training_backend"] == "remote"
+    assert backend.payload["training_data"]
+    assert backend.payload["eval_prompts"]
+    assert backend.payload["eval_set"]["hash"] == LOCKED_EVAL_SET.hash
+    assert "expected" not in json.dumps(backend.payload["eval_prompts"])
