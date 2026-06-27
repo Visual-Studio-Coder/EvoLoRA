@@ -1,6 +1,7 @@
 """Tests for planners — heuristic and MiniMax fallback."""
 
 import json
+
 import pytest
 from pydantic import ValidationError
 

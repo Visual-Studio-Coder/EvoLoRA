@@ -1,6 +1,7 @@
 """Tests for the locked eval set and objective evaluator."""
 
 import json
+
 import pytest
 
 from evolora.evaluation.evaluator import evaluate_sample

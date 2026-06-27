@@ -72,7 +72,6 @@ async def test_best_iteration_preserved():
 @pytest.mark.asyncio
 async def test_no_secrets_in_prompts():
     """Eval prompts passed to runner must not contain expected answers."""
-    orch = _make_orch(max_iterations=1)
     prompts = LOCKED_EVAL_SET.prompts_only()
     for p in prompts:
         assert "expected" not in p

@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
-class EventKind(str, Enum):
+class EventKind(StrEnum):
     RUN_STARTED = "run_started"
     STATUS_CHANGED = "status_changed"
     EVAL_SET_LOCKED = "eval_set_locked"
@@ -46,5 +46,5 @@ class Event(BaseModel):
     ts: datetime = Field(default_factory=_now)
 
     @classmethod
-    def log(cls, run_id: str, message: str, iteration: int | None = None) -> "Event":
+    def log(cls, run_id: str, message: str, iteration: int | None = None) -> Event:
         return cls(kind=EventKind.LOG, run_id=run_id, message=message, iteration=iteration)

@@ -7,7 +7,7 @@ import random
 from collections.abc import AsyncIterator
 from typing import Protocol, runtime_checkable
 
-from evolora.models.core import AgentPlan, ArtifactMeta, TrainingDataSpec
+from evolora.models.core import AgentPlan, ArtifactMeta
 
 
 @runtime_checkable
@@ -57,7 +57,8 @@ class MockTrainingBackend:
             yield {"step": step, "total_steps": steps, "loss": round(loss, 4), "done": False}
             await asyncio.sleep(0.05)
 
-        import hashlib, json, os
+        import hashlib
+        import json
 
         artifact_id = f"mock-adapter-run{iteration}-{run_id[:8]}"
         checksum = hashlib.sha256(

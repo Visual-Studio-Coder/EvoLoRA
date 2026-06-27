@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _run_id() -> str:
@@ -23,7 +23,7 @@ def _run_id() -> str:
 # ---------------------------------------------------------------------------
 
 
-class RunStatus(str, Enum):
+class RunStatus(StrEnum):
     PENDING = "pending"
     PREPARING = "preparing"
     LOCKING_EVAL = "locking_eval"
@@ -38,7 +38,7 @@ class RunStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-class StopReason(str, Enum):
+class StopReason(StrEnum):
     TARGET_SCORE = "target_score"
     MAX_ITERATIONS = "max_iterations"
     BUDGET_CAP = "budget_cap"

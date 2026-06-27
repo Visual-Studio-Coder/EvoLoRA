@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncIterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from evolora.agent.planner import HeuristicPlanner, MiniMaxPlanner
 from evolora.evaluation.evaluator import ObjectiveEvaluator
@@ -27,7 +26,7 @@ from evolora.training.runner import MockModelRunner, ModelRunner
 
 
 def _now():
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class Orchestrator:
