@@ -42,6 +42,9 @@ class FakeRemoteFile:
     def write(self, data: str) -> None:
         self._sftp.files[self._path] = data
 
+    def read(self) -> str:
+        return self._sftp.files.get(self._path, "")
+
 
 class FakeSFTP:
     def __init__(self) -> None:
@@ -61,7 +64,7 @@ class FakeSFTP:
         self.dirs.add(path)
 
     def file(self, path: str, mode: str) -> FakeRemoteFile:
-        assert mode == "w"
+        assert mode in {"w", "r"}
         return FakeRemoteFile(self, path)
 
     def close(self) -> None:
@@ -170,6 +173,9 @@ async def test_remote_training_backend_pushes_files_runs_commands_and_yields_art
     assert final["done"] is True
     assert final["artifact"].adapter_path == "/workspace/lora_model"
     assert final["artifact"].is_mock is False
+    # backend pulls data/evals.json back ([{input, expected}] here; "actual" added on a real VM)
+    assert len(final["eval_records"]) == len(LOCKED_EVAL_SET)
+    assert "input" in final["eval_records"][0]
 
 
 @pytest.mark.asyncio
