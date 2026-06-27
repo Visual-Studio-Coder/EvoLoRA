@@ -9,6 +9,9 @@ sets here before they can reach a training backend.
 
 from __future__ import annotations
 
+import json
+import re
+
 # ---------------------------------------------------------------------------
 # Allowed hyperparameter choices (from the agent design).
 # ---------------------------------------------------------------------------
@@ -88,7 +91,10 @@ TOOLS: list[dict] = [
                                     "type": "object",
                                     "properties": {
                                         "prompt": {"type": "string"},
-                                        "completion": {"type": "string"},
+                                        "completion": {
+                                            "type": "string",
+                                            "description": "The desired model response. Must be a valid JSON string; for SQL tasks use {\"sql\": \"...\"}.",
+                                        },
                                     },
                                     "required": ["prompt", "completion"],
                                 },
@@ -181,13 +187,36 @@ def extract_training_payload(args: dict) -> tuple[list[dict[str, str]], str]:
         payload = args
 
     raw_examples = payload.get("examples", [])
-    accepted = [
-        {"prompt": str(example["prompt"]), "completion": str(example["completion"])}
-        for example in raw_examples
-        if isinstance(example, dict) and example.get("prompt") and example.get("completion")
-    ]
+    accepted = []
+    for example in raw_examples:
+        if not isinstance(example, dict) or not example.get("prompt") or not example.get("completion"):
+            continue
+        prompt = str(example["prompt"])
+        completion = _normalize_completion(prompt, str(example["completion"]))
+        accepted.append({"prompt": prompt, "completion": completion})
     rationale = payload.get("rationale") or args.get("rationale") or ""
     return accepted, str(rationale)
+
+
+def _normalize_completion(prompt: str, completion: str) -> str:
+    """Keep training completions aligned with strict-JSON eval expectations."""
+    stripped = completion.strip()
+    try:
+        json.loads(stripped)
+        return stripped
+    except json.JSONDecodeError:
+        pass
+
+    if _looks_like_sql_task(prompt, stripped):
+        return json.dumps({"sql": stripped})
+    return stripped
+
+
+def _looks_like_sql_task(prompt: str, completion: str) -> bool:
+    text = f"{prompt}\n{completion}".lower()
+    if "sql" in text or "query" in text:
+        return True
+    return bool(re.match(r"^\s*(select|with|insert|update|delete)\b", completion, re.IGNORECASE))
 
 
 def coerce_hyperparams(args: dict) -> dict:

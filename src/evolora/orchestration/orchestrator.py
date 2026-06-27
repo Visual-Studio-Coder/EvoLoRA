@@ -202,7 +202,15 @@ class Orchestrator:
             )
 
             if fallback:
-                yield await emit(EventKind.AGENT_FALLBACK_USED, "MiniMax unavailable — heuristic plan used")
+                fallback_reason = str(getattr(self._planner, "last_error", "")).strip()
+                message = "MiniMax unavailable — heuristic plan used"
+                if fallback_reason:
+                    message = f"{message}: {fallback_reason[:180]}"
+                yield await emit(
+                    EventKind.AGENT_FALLBACK_USED,
+                    message,
+                    reason=fallback_reason,
+                )
             yield await emit(EventKind.PLAN_RECEIVED, "Plan received", rationale=plan.rationale[:200], focus_areas=plan.focus_areas)
 
             # --- VALIDATE DATA ---

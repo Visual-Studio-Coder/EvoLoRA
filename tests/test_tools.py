@@ -61,6 +61,28 @@ def test_extract_training_payload_prefers_training_json():
     assert rationale == "covers outage urgency"
 
 
+def test_extract_training_payload_wraps_raw_sql_completion_as_json():
+    examples, _ = extract_training_payload(
+        {
+            "training_json": {
+                "examples": [
+                    {
+                        "prompt": "Write a SQL query to count orders.",
+                        "completion": "SELECT COUNT(*) FROM orders",
+                    }
+                ]
+            }
+        }
+    )
+
+    assert examples == [
+        {
+            "prompt": "Write a SQL query to count orders.",
+            "completion": '{"sql": "SELECT COUNT(*) FROM orders"}',
+        }
+    ]
+
+
 def test_extract_training_payload_keeps_flat_shape_compatible():
     examples, rationale = extract_training_payload(
         {
