@@ -25,6 +25,66 @@ class SectionTitle(Static):
     """Small green terminal-style section label."""
 
 
+# Maps the run-state label shown in the status bar to a mascot mood.
+_STATE_MOOD = {
+    "READY": "idle", "INVALID": "sad",
+    "STARTING": "run", "RUNNING": "run",
+    "LOCKED": "think", "BASELINE": "look",
+    "PLANNING": "think", "VALIDATE": "run",
+    "TRAINING": "run", "TRAINED": "happy",
+    "EVALUATE": "look", "EVAL": "look",
+    "JUDGE": "look", "JUDGED": "think",
+    "DECIDE": "think", "APPROVE": "think",
+    "APPROVED": "run", "DECLINED": "idle",
+    "BEST": "happy", "ITERATION": "run",
+    "STOP": "idle", "DONE": "happy",
+    "CANCEL": "sad", "CANCELLED": "sad", "FAILED": "sad",
+}
+
+
+class Mascot(Static):
+    """A little terminal critter that runs back and forth, mirroring the run state."""
+
+    # mood -> (face_right, face_left, caption, moving)
+    MOODS = {
+        "idle": ("('-')", "('-')", "standing by", False),
+        "think": ("('-'?)", "(?'-')", "thinking", True),
+        "run": ("(>'-')>", "<('-'<)", "working", True),
+        "look": ("(o-o)", "(o-o)", "evaluating", True),
+        "happy": ("\\('o')/", "\\('o')/", "done!", False),
+        "sad": ("(._.)", "(._.)", "hmm", False),
+    }
+
+    def __init__(self, **kwargs) -> None:
+        self._mood = "idle"
+        self._pos = 0
+        self._dir = 1
+        self._track = 16
+        super().__init__(self._frame(), **kwargs)
+
+    def on_mount(self) -> None:
+        self.set_interval(0.16, self._tick)
+
+    def set_mood(self, mood: str) -> None:
+        self._mood = mood if mood in self.MOODS else "idle"
+        self.update(self._frame())
+
+    def _tick(self) -> None:
+        if self.MOODS[self._mood][3]:  # moving
+            self._pos += self._dir
+            if self._pos >= self._track:
+                self._pos, self._dir = self._track, -1
+            elif self._pos <= 0:
+                self._pos, self._dir = 0, 1
+        self.update(self._frame())
+
+    def _frame(self) -> str:
+        face_right, face_left, caption, _ = self.MOODS[self._mood]
+        face = face_right if self._dir > 0 else face_left
+        cell = ((" " * self._pos) + face).ljust(self._track + 8)
+        return f"[#39ff14]{cell}[/][#005a1c]{caption}[/]"
+
+
 class EvoLoRAApp(App[None]):
     """Native Textual interface for the EvoLoRA loop."""
 
@@ -60,33 +120,23 @@ class EvoLoRAApp(App[None]):
     }
 
     #brand {
-        width: 1fr;
+        width: auto;
         content-align: left middle;
         text-style: bold;
         color: #39ff14;
+    }
+
+    #mascot {
+        width: 1fr;
+        height: 1;
+        margin: 0 2;
+        content-align: left middle;
     }
 
     #clock {
         width: 22;
         content-align: right middle;
         color: #003010;
-    }
-
-    .tab {
-        width: auto;
-        min-width: 11;
-        height: 1;
-        margin: 0 1 0 0;
-        padding: 0 1;
-        content-align: center middle;
-        color: #003d10;
-        border: solid #0a5a24;
-    }
-
-    .tab.active {
-        color: #39ff14;
-        background: #00280d;
-        border: solid #00641e;
     }
 
     #main {
@@ -267,10 +317,7 @@ class EvoLoRAApp(App[None]):
         with Container(id="frame"):
             with Horizontal(id="topbar"):
                 yield Static("> EvoLoRA", id="brand")
-                yield Static("TRAIN", classes="tab active")
-                yield Static("EVALUATE", classes="tab")
-                yield Static("EXPORT", classes="tab")
-                yield Static("SETTINGS", classes="tab")
+                yield Mascot(id="mascot")
                 yield Static("", id="clock")
 
             with Horizontal(id="main"):
@@ -330,7 +377,6 @@ class EvoLoRAApp(App[None]):
     def on_mount(self) -> None:
         self.set_interval(1, self._update_clock)
         self._update_clock()
-        self._seed_design_content()
         self._update_config_panel()
         self._update_metrics_panel()
         self.query_one("#goal-input", Input).focus()
@@ -631,19 +677,6 @@ class EvoLoRAApp(App[None]):
         if kind == EventKind.LOG:
             self._agent_log().write(event.message)
 
-    def _seed_design_content(self) -> None:
-        agent = self._agent_log()
-        examples = self._examples_log()
-        agent.write("[green][OK][/] Parsed use case description")
-        agent.write("[green][OK][/] Domain identified: structured customer spending summary")
-        agent.write("[green][OK][/] Locked benchmark and adaptive diagnostics are separate")
-        agent.write("[bright_green][>][/] Ready to synthesize targeted training examples")
-        agent.write("[#003a10]    JSON output | numeric totals | no markdown fences[/]")
-
-        examples.write("[#003a10]#001[/] [#005a1e]user >[/] Summarize customers and purchases as strict JSON")
-        examples.write("[#003a10]#002[/] [#005a1e]asst >[/] {top_customer, top_customer_total, customer_count, total_revenue, summary}")
-        examples.write("[#003a10]#003[/] [#005a1e]rule >[/] adaptive challenge scores stay diagnostic, not official")
-
     def _update_examples_from_record(self) -> None:
         if self._orchestrator is None:
             return
@@ -729,6 +762,7 @@ class EvoLoRAApp(App[None]):
     def _set_state(self, state: str, detail: str) -> None:
         self.query_one("#run-state", Static).update(state)
         self.query_one("#status-text", Static).update(detail)
+        self.query_one("#mascot", Mascot).set_mood(_STATE_MOOD.get(state, "idle"))
 
     def _set_retrain_buttons(self, enabled: bool) -> None:
         self.query_one("#approve-retrain-button", Button).disabled = not enabled
