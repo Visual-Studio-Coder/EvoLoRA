@@ -28,11 +28,11 @@ calling these tools, in order:
      (call exactly once, last).
 Keep training data focused and de-duplicated. After start_training_model is called, stop."""
 
-_EVAL_GEN_SYSTEM = """You generate a small, objective evaluation set for fine-tuning a model on
-the user's task. Output ONLY a JSON array (no markdown, no prose). Each item must be
-{"prompt": "<the input the model receives>", "expected": {<the exact correct JSON object the
-model should output>}}. Make every "expected" an object with concrete, automatically checkable
-field values. Keep prompts varied, realistic, and unambiguous."""
+_EVAL_GEN_SYSTEM = """You create the evaluation set for fine-tuning a model on the user's task.
+Call the create_evals tool with `criteria` (what a correct answer must satisfy) and
+`eval_examples` — concrete {prompt, expected_output} pairs where expected_output is the exact
+correct JSON object the model should produce. Make examples varied, realistic, and objectively
+checkable."""
 
 
 def _strip_think(text: str) -> str:
@@ -243,18 +243,19 @@ class MiniMaxPlanner:
         return fallback, True
 
     async def generate_evals(self, goal: str, count: int = 5) -> list[dict]:
-        """Ask MiniMax to generate an objective eval set for the goal.
+        """Have MiniMax CALL the create_evals tool to produce an objective eval set.
 
         Returns a list of {"prompt": str, "expected": dict}. Returns [] on any
         failure so the orchestrator can fall back to its default eval set.
         """
         client = self._make_client()
+        create_evals_tools = [t for t in TOOLS if t["function"]["name"] == "create_evals"]
         user_prompt = json.dumps({
             "goal": goal,
             "count": count,
             "instruction": (
-                f"Generate exactly {count} evaluation examples for this goal. Each 'expected' "
-                "must be the single correct JSON output for its prompt, with concrete values."
+                f"Call create_evals with criteria and exactly {count} eval_examples for this "
+                "goal. Each expected_output must be the single correct JSON output for its prompt."
             ),
         })
         try:
@@ -264,19 +265,22 @@ class MiniMaxPlanner:
                     {"role": "system", "content": _EVAL_GEN_SYSTEM},
                     {"role": "user", "content": user_prompt},
                 ],
+                tools=create_evals_tools,
+                tool_choice={"type": "function", "function": {"name": "create_evals"}},
                 temperature=0.2,
                 max_tokens=2000,
             )
-            data = _extract_json(resp.choices[0].message.content or "")
+            tool_calls = resp.choices[0].message.tool_calls or []
+            args = json.loads(tool_calls[0].function.arguments or "{}") if tool_calls else {}
         except Exception:
             return []
 
         evals: list[dict] = []
-        for item in data if isinstance(data, list) else []:
+        for item in args.get("eval_examples", []):
             if not isinstance(item, dict):
                 continue
             prompt = item.get("prompt")
-            expected = item.get("expected")
+            expected = item.get("expected_output")
             if prompt and isinstance(expected, dict):
                 evals.append({"prompt": str(prompt), "expected": expected})
             if len(evals) >= count:
