@@ -133,6 +133,8 @@ async def test_remote_training_backend_pushes_files_runs_commands_and_yields_art
     )
     evaluate_script = tmp_path / "evaluate.py"
     evaluate_script.write_text("print('eval script')\n", encoding="utf-8")
+    train_script = tmp_path / "train.py"
+    train_script.write_text("print('train script')\n", encoding="utf-8")
     fake_client = FakeSSHClient()
     backend = RemoteTrainingBackend(
         ssh_host="gpu.example.com",
@@ -142,6 +144,7 @@ async def test_remote_training_backend_pushes_files_runs_commands_and_yields_art
         remote_config_path="/workspace/config.json",
         ssh_client_factory=lambda: fake_client,
         evaluate_script_path=evaluate_script,
+        train_script_path=train_script,
     )
 
     stream = await backend.train(
@@ -167,6 +170,7 @@ async def test_remote_training_backend_pushes_files_runs_commands_and_yields_art
     }
     assert "/workspace/data/training_data.jsonl" in fake_client.sftp.files
     assert "/workspace/data/evals.json" in fake_client.sftp.files
+    assert fake_client.sftp.files["/workspace/train.py"] == "print('train script')\n"
     assert fake_client.sftp.files["/workspace/evaluate.py"] == "print('eval script')\n"
     assert any(event.get("phase") == "train" for event in events)
     assert any(event.get("phase") == "evaluate" for event in events)
