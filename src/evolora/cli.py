@@ -28,7 +28,7 @@ def doctor() -> None:
         status = "[green]OK[/green]" if ok else "[red]MISSING[/red]"
         table.add_row(name, status, detail)
 
-    row("Python ≥ 3.11", sys.version_info >= (3, 11), sys.version.split()[0])
+    row("Python >= 3.11", sys.version_info >= (3, 11), sys.version.split()[0])
     row("MINIMAX_API_KEY", cfg.minimax_available, "set" if cfg.minimax_available else "not set — mock mode")
     row("MONGODB_URI", cfg.mongo_available, "set" if cfg.mongo_available else "not set — in-memory")
     row("TRAINING_BACKEND", True, cfg.training_backend)

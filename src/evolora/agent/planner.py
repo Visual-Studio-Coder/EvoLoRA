@@ -96,6 +96,7 @@ class MiniMaxPlanner:
         current_score: float,
         failures: list[EvalResult],
         training_sample_count: int | None = None,
+        goal: str = "",
     ) -> str:
         failure_summary = [
             {"sample_id": f.sample_id, "score": f.score, "details": f.details}
@@ -108,9 +109,12 @@ class MiniMaxPlanner:
             "failure_count": len(failures),
             "sample_failures": failure_summary,
             "task": "structured customer spending summary (JSON output)",
+            "user_goal": goal or None,
             "requested_training_sample_count": training_sample_count,
             "instruction": (
                 "Use create_evals, then add_training_examples, then start_training_model. "
+                "If user_goal is provided, tailor the eval criteria and training examples toward "
+                "it (while keeping outputs as strict JSON). "
                 "If requested_training_sample_count is not null, add exactly that many training "
                 "examples. If it is null, choose a sensible number yourself. "
                 "Do NOT include expected answers in your training data."
@@ -124,11 +128,12 @@ class MiniMaxPlanner:
         current_score: float,
         failures: list[EvalResult],
         training_sample_count: int | None = None,
+        goal: str = "",
     ) -> tuple[AgentPlan, bool]:
         """Return (plan, fallback_used). Drives the three tools; falls back on any failure."""
         client = self._make_client()
         user_prompt = self._build_user_prompt(
-            iteration, baseline_score, current_score, failures, training_sample_count
+            iteration, baseline_score, current_score, failures, training_sample_count, goal
         )
         messages: list[dict] = [
             {"role": "system", "content": _TOOL_SYSTEM_PROMPT},
@@ -222,7 +227,7 @@ class MiniMaxPlanner:
             pass
 
         fallback = HeuristicPlanner().plan(
-            iteration, baseline_score, current_score, failures, training_sample_count
+            iteration, baseline_score, current_score, failures, training_sample_count, goal
         )
         return fallback, True
 
@@ -237,10 +242,12 @@ class HeuristicPlanner:
         current_score: float,
         failures: list[EvalResult],
         training_sample_count: int | None = None,
+        goal: str = "",
     ) -> AgentPlan:
         r = min(64, 8 * (2 ** min(iteration - 1, 2)))
         lr = max(5e-5, 2e-4 / (iteration + 1))
         example_count = training_sample_count or min(5 + iteration * 2, 20)
+        goal_note = f" for goal: {goal}" if goal else ""
 
         examples = [
             {
@@ -264,7 +271,7 @@ class HeuristicPlanner:
                 rationale="Heuristic fallback plan",
                 max_examples=example_count,
             ),
-            rationale=f"Heuristic plan for iteration {iteration} (MiniMax unavailable)",
+            rationale=f"Heuristic plan for iteration {iteration} (MiniMax unavailable){goal_note}",
             focus_areas=["json_format", "field_accuracy"],
         )
 
