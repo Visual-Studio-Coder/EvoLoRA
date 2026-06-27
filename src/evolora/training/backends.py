@@ -110,6 +110,7 @@ class RemoteTrainingBackend:
         ssh_client_factory=None,
         evaluate_script_path: str | Path | None = None,
         train_script_path: str | Path | None = None,
+        baseline_script_path: str | Path | None = None,
     ) -> None:
         cfg = get_config()
         self._base_url = base_url
@@ -125,6 +126,7 @@ class RemoteTrainingBackend:
         self._ssh_client_factory = ssh_client_factory
         self._evaluate_script_path = Path(evaluate_script_path) if evaluate_script_path else _default_evaluate_script_path()
         self._train_script_path = Path(train_script_path) if train_script_path else _default_train_script_path()
+        self._baseline_script_path = Path(baseline_script_path) if baseline_script_path else _default_baseline_script_path()
 
     async def train(
         self,
@@ -135,6 +137,51 @@ class RemoteTrainingBackend:
         remote_payload: dict | None = None,
     ) -> AsyncIterator[dict]:
         return self._stream(run_id, iteration, remote_payload)
+
+    async def evaluate_base(self, remote_payload: dict | None = None) -> AsyncIterator[dict]:
+        """Run the base model on the locked evals on the VM and pull filled records."""
+        return self._baseline_stream(remote_payload)
+
+    async def _baseline_stream(self, remote_payload: dict | None) -> AsyncIterator[dict]:
+        self._assert_configured(remote_payload)
+
+        yield {"phase": "baseline", "message": "Uploading VM baseline config/evals", "done": False}
+        push_result = await asyncio.to_thread(
+            push_config,
+            remote_payload,
+            ssh_host=self._ssh_host,
+            ssh_user=self._ssh_user,
+            ssh_port=self._ssh_port,
+            ssh_key_path=self._ssh_key_path,
+            remote_config_path=self._remote_config_path,
+            ssh_client_factory=self._ssh_client_factory,
+        )
+        yield {
+            "phase": "baseline",
+            "message": push_result.message,
+            "byte_count": push_result.byte_count,
+            "done": False,
+        }
+
+        yield {"phase": "baseline", "message": "Uploading VM baseline_evaluate.py", "done": False}
+        await asyncio.to_thread(
+            self._push_script,
+            self._baseline_script_path,
+            "baseline_evaluate.py",
+        )
+
+        baseline_command = f"cd {self._remote_workspace} && python -u baseline_evaluate.py"
+        async for line in self._exec_remote_command(baseline_command):
+            yield {"phase": "baseline", "message": line, "done": False}
+
+        evals_remote = f"{self._remote_workspace}/data/evals.json"
+        eval_records = await asyncio.to_thread(self._pull_json, evals_remote)
+        yield {
+            "phase": "baseline",
+            "message": f"Pulled {len(eval_records)} baseline eval records",
+            "eval_records": eval_records,
+            "done": True,
+        }
 
     async def _stream(
         self,
@@ -166,11 +213,11 @@ class RemoteTrainingBackend:
         await asyncio.to_thread(self._push_script, self._train_script_path, "train.py")
         await asyncio.to_thread(self._push_script, self._evaluate_script_path, "evaluate.py")
 
-        train_command = f"cd {self._remote_workspace} && python train.py"
+        train_command = f"cd {self._remote_workspace} && python -u train.py"
         async for line in self._exec_remote_command(train_command):
             yield {"phase": "train", "message": line, "done": False}
 
-        eval_command = f"cd {self._remote_workspace} && python evaluate.py"
+        eval_command = f"cd {self._remote_workspace} && python -u evaluate.py"
         async for line in self._exec_remote_command(eval_command):
             yield {"phase": "evaluate", "message": line, "done": False}
 
@@ -280,32 +327,47 @@ class RemoteTrainingBackend:
             client.close()
 
     async def _exec_remote_command(self, command: str) -> AsyncIterator[str]:
-        lines, exit_status, stderr = await asyncio.to_thread(self._exec_blocking, command)
-        for line in lines:
-            yield line
+        queue: asyncio.Queue[str | None] = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+        worker = asyncio.create_task(
+            asyncio.to_thread(self._exec_streaming_blocking, command, loop, queue)
+        )
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            yield item
+        exit_status, stderr = await worker
         if exit_status != 0:
             detail = f": {stderr}" if stderr else ""
             raise RuntimeError(f"Remote command failed ({exit_status}) {command}{detail}")
 
-    def _exec_blocking(self, command: str) -> tuple[list[str], int, str]:
+    def _exec_streaming_blocking(
+        self,
+        command: str,
+        loop: asyncio.AbstractEventLoop,
+        queue: asyncio.Queue[str | None],
+    ) -> tuple[int, str]:
         client = self._connect_client()
         try:
-            _, stdout, stderr = client.exec_command(command)
-            raw_lines = stdout.readlines()
+            _, stdout, stderr = client.exec_command(command, get_pty=True)
+            while True:
+                raw = stdout.readline()
+                if not raw:
+                    break
+                text = raw.decode(errors="replace") if isinstance(raw, bytes) else str(raw)
+                text = text.rstrip()
+                if text:
+                    loop.call_soon_threadsafe(queue.put_nowait, text)
             exit_status = stdout.channel.recv_exit_status()
             err = stderr.read()
             if isinstance(err, bytes):
                 err_text = err.decode(errors="replace")
             else:
                 err_text = str(err or "")
-            lines = []
-            for line in raw_lines:
-                text = line.decode(errors="replace") if isinstance(line, bytes) else str(line)
-                text = text.rstrip()
-                if text:
-                    lines.append(text)
-            return lines, exit_status, err_text.strip()
+            return exit_status, err_text.strip()
         finally:
+            loop.call_soon_threadsafe(queue.put_nowait, None)
             client.close()
 
 
@@ -356,3 +418,8 @@ def _default_train_script_path() -> Path:
     # The VM guy's committed train.py (reads config.json + data/training_data.jsonl, saves the
     # adapter to lora_model/). Pushed so a run is self-contained even if /workspace was wiped.
     return Path(__file__).resolve().parents[3] / "src" / "virtual_machine_code" / "train.py"
+
+
+def _default_baseline_script_path() -> Path:
+    # Separate baseline evaluator: same eval format as VM evaluate.py, but loads the base model.
+    return Path(__file__).resolve().parents[3] / "scripts" / "vm" / "baseline_evaluate.py"

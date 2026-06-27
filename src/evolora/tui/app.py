@@ -318,6 +318,7 @@ class EvoLoRAApp(App[None]):
         self._judge_rating: float | None = None
         self._requested_sample_count: int | None = 30
         self._goal = ""
+        self._approval_context: str | None = None
 
     def compose(self) -> ComposeResult:
         with Container(id="frame"):
@@ -419,6 +420,7 @@ class EvoLoRAApp(App[None]):
         self._best = 0.0
         self._current = 0.0
         self._judge_rating = None
+        self._approval_context = None
         self.query_one("#start-button", Button).disabled = True
         self.query_one("#cancel-button", Button).disabled = False
         self._set_retrain_buttons(False)
@@ -446,8 +448,11 @@ class EvoLoRAApp(App[None]):
             return
         self._orchestrator.submit_retrain_approval(approved)
         self._set_retrain_buttons(False)
+        context = self._approval_context or "retrain"
+        self._approval_context = None
         answer = "approved" if approved else "declined"
-        self._agent_log().write(f"[yellow][user][/] Retrain {answer}")
+        label = "Generated eval set" if context == "evals" else "Retrain"
+        self._agent_log().write(f"[yellow][user][/] {label} {answer}")
 
     async def _run_evolora(self) -> None:
         cfg = get_config()
@@ -547,6 +552,17 @@ class EvoLoRAApp(App[None]):
             self._agent_log().write("[red][!][/] MiniMax unavailable; using heuristic fallback")
             return
 
+        if kind == EventKind.EVAL_APPROVAL_REQUIRED:
+            evals = data.get("evals", []) or []
+            self._approval_context = "evals"
+            self._set_state("APPROVE", f"Review {len(evals)} generated evals | YES or NO")
+            self._agent_log().write(
+                f"[yellow][?][/] MiniMax generated [bold]{len(evals)}[/] eval examples. Approve them before locking the benchmark."
+            )
+            self._render_eval_approval(evals)
+            self._set_retrain_buttons(True)
+            return
+
         if kind == EventKind.PLAN_RECEIVED:
             focus = ", ".join(data.get("focus_areas", []) or ["json_format", "field_accuracy"])
             self._agent_log().write(f"[green][OK][/] Plan received. Focus: [bold]{focus}[/]")
@@ -634,6 +650,7 @@ class EvoLoRAApp(App[None]):
 
         if kind == EventKind.USER_APPROVAL_REQUIRED:
             rating = float(data.get("rating", 0.0))
+            self._approval_context = "retrain"
             self._set_state("APPROVE", f"Retrain? judge rating {rating:.2f} | YES or NO")
             self._agent_log().write(
                 f"[yellow][?][/] Retraining is recommended. Judge rating: [bold]{rating:.2f}[/]. Choose YES or NO."
@@ -644,6 +661,7 @@ class EvoLoRAApp(App[None]):
         if kind == EventKind.USER_APPROVAL_RECEIVED:
             approved = bool(data.get("approved", False))
             self._set_state("APPROVED" if approved else "DECLINED", event.message)
+            self._approval_context = None
             self._set_retrain_buttons(False)
             return
 
@@ -698,6 +716,17 @@ class EvoLoRAApp(App[None]):
             completion = str(example.get("completion", "")).replace("\n", " ")[:100]
             log.write(f"[#003a10]#{index:03d}[/] [#00aa44]{prompt}[/]")
             log.write(f"      [#007a1e]{completion}[/]")
+
+    def _render_eval_approval(self, evals: list[dict]) -> None:
+        log = self._examples_log()
+        log.write("[yellow]generated evals awaiting approval[/]")
+        for index, item in enumerate(evals[:10], start=1):
+            prompt = str(item.get("input", "")).replace("\n", " ")[:120]
+            expected = str(item.get("expected", "")).replace("\n", " ")[:160]
+            log.write(f"[#ffb000]eval #{index:02d} input[/]: {prompt}")
+            log.write(f"[#d97b00]expected[/]: {expected}")
+        if len(evals) > 10:
+            log.write(f"[#805000]... {len(evals) - 10} more eval examples hidden[/]")
 
     def _update_clock(self) -> None:
         self.query_one("#clock", Static).update(datetime.now().strftime("%Y-%m-%d  %H:%M:%S"))

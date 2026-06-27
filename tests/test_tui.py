@@ -5,11 +5,12 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from textual.widgets import Input
+from textual.widgets import Button, Input
 
 import evolora.tui.app as tui_app
 from evolora.config import Config
 from evolora.models.core import RunConfig
+from evolora.models.events import Event, EventKind
 from evolora.tui.app import EvoLoRAApp
 
 
@@ -95,3 +96,22 @@ async def test_tui_blank_sample_count_leaves_choice_to_agent(
     )
 
     assert config.training_sample_count is None
+
+
+@pytest.mark.asyncio
+async def test_tui_eval_approval_event_enables_yes_no_buttons() -> None:
+    app = EvoLoRAApp()
+
+    async with app.run_test(size=(120, 40)):
+        app._apply_event(
+            Event(
+                kind=EventKind.EVAL_APPROVAL_REQUIRED,
+                run_id="run-1",
+                message="Approve generated evals?",
+                data={"evals": [{"input": "q", "expected": '{"ok": true}'}]},
+            )
+        )
+
+        assert app._approval_context == "evals"
+        assert app.query_one("#approve-retrain-button", Button).disabled is False
+        assert app.query_one("#decline-retrain-button", Button).disabled is False

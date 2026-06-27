@@ -2,8 +2,17 @@
 
 import pytest
 
+from evolora.agent.planner import HeuristicPlanner, MiniMaxPlanner
 from evolora.demo.task import ADAPTIVE_EVAL_SET, LOCKED_EVAL_SET
-from evolora.models.core import JudgeReport, RetrainDecision, RunConfig, RunStatus, StopReason
+from evolora.models.core import (
+    AgentPlan,
+    ArtifactMeta,
+    JudgeReport,
+    RetrainDecision,
+    RunConfig,
+    RunStatus,
+    StopReason,
+)
 from evolora.models.events import EventKind
 from evolora.orchestration.orchestrator import Orchestrator
 from evolora.persistence.store import InMemoryRunStore
@@ -62,6 +71,81 @@ class StaticRetrainAdvisor:
         )
 
 
+class EvalGatePlanner(MiniMaxPlanner):
+    def __init__(self) -> None:
+        pass
+
+    async def generate_evals(self, goal: str, count: int = 5) -> list[dict]:
+        return [{"prompt": f"{goal}: produce JSON", "expected": {"ok": True}}]
+
+    async def plan(self, *args, **kwargs):
+        return HeuristicPlanner().plan(*args, **kwargs), False
+
+
+class StaticLLMJudge:
+    async def judge(self, records: list[dict]) -> tuple[float, list[dict]]:
+        scored = []
+        scores = []
+        for record in records:
+            score = 2 if record.get("actual") == "base" else 8
+            scored.append({**record, "score": score, "reason": "test judge"})
+            scores.append(score)
+        return sum(scores) / len(scores) / 10.0, scored
+
+
+class RemoteBackendWithBaseline:
+    is_mock = False
+    name = "remote"
+
+    def __init__(self) -> None:
+        self.baseline_payload: dict | None = None
+        self.train_payload: dict | None = None
+
+    async def evaluate_base(self, remote_payload=None):
+        self.baseline_payload = remote_payload
+
+        async def stream():
+            yield {"phase": "baseline", "message": "baseline live log", "done": False}
+            yield {
+                "done": True,
+                "eval_records": [{"input": "q", "expected": "a", "actual": "base"}],
+            }
+
+        return stream()
+
+    async def train(
+        self,
+        run_id: str,
+        iteration: int,
+        plan: AgentPlan,
+        base_model_id: str,
+        remote_payload=None,
+    ):
+        self.train_payload = remote_payload
+
+        async def stream():
+            yield {"phase": "train", "message": "unsloth step 1", "done": False}
+            yield {
+                "done": True,
+                "artifact": ArtifactMeta(
+                    run_id=run_id,
+                    iteration=iteration,
+                    adapter_path="/workspace/lora_model",
+                    score=0.0,
+                    checksum="remote-test",
+                    is_mock=False,
+                ),
+                "eval_records": [{"input": "q", "expected": "a", "actual": "trained"}],
+                "cost_usd": 0.0,
+                "duration_s": 0.0,
+            }
+
+        return stream()
+
+    async def health_check(self) -> bool:
+        return True
+
+
 @pytest.mark.asyncio
 async def test_happy_path_completes():
     orch = _make_orch()
@@ -99,6 +183,58 @@ async def test_event_ordering():
     assert kinds[1] == EventKind.EVAL_SET_LOCKED
     assert kinds[2] == EventKind.STATUS_CHANGED  # baseline status
     assert kinds[3] == EventKind.BASELINE_COMPLETE
+
+
+@pytest.mark.asyncio
+async def test_generated_evals_require_user_approval_before_locking():
+    cfg = RunConfig(max_iterations=1, target_score=1.0, goal="custom receipt parser")
+    orch = Orchestrator(
+        config=cfg,
+        eval_set=LOCKED_EVAL_SET,
+        planner=EvalGatePlanner(),
+        run_store=InMemoryRunStore(),
+    )
+
+    events = []
+    async for event in await orch.run():
+        events.append(event)
+        if event.kind == EventKind.EVAL_APPROVAL_REQUIRED:
+            assert event.data["evals"] == [
+                {
+                    "input": "custom receipt parser: produce JSON",
+                    "expected": '{"ok": true}',
+                }
+            ]
+            orch.submit_retrain_approval(False)
+
+    kinds = [event.kind for event in events]
+    assert EventKind.EVAL_APPROVAL_REQUIRED in kinds
+    assert EventKind.EVAL_SET_LOCKED not in kinds
+    assert orch._record.status == RunStatus.CANCELLED
+    assert orch._record.stop_reason == StopReason.CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_remote_baseline_uses_vm_records_and_llm_judge():
+    backend = RemoteBackendWithBaseline()
+    cfg = RunConfig(max_iterations=1, target_score=1.0, training_backend="remote")
+    orch = Orchestrator(
+        config=cfg,
+        eval_set=LOCKED_EVAL_SET,
+        training_backend=backend,
+        llm_judge=StaticLLMJudge(),
+        run_store=InMemoryRunStore(),
+    )
+
+    events, rec = await _collect(orch)
+    log_messages = [event.message for event in events if event.kind == EventKind.LOG]
+
+    assert backend.baseline_payload is not None
+    assert backend.train_payload is not None
+    assert rec.baseline_score == 0.2
+    assert rec.iterations[0].score == 0.8
+    assert "[remote:baseline] baseline live log" in log_messages
+    assert "[remote:train] unsloth step 1" in log_messages
 
 
 @pytest.mark.asyncio

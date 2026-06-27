@@ -140,6 +140,7 @@ def _print_event(event) -> None:
         EventKind.PLANNING_STARTED: "[bold yellow]PLAN    [/]",
         EventKind.PLAN_RECEIVED: "[bold yellow]PLAN OK [/]",
         EventKind.AGENT_FALLBACK_USED: "[bold red]FALLBACK[/]",
+        EventKind.EVAL_APPROVAL_REQUIRED: "[bold yellow]APPROVE [/]",
         EventKind.TRAINING_STARTED: "[bold]TRAIN   [/]",
         EventKind.TRAINING_PROGRESS: None,  # skip progress spam in CLI
         EventKind.TRAINING_COMPLETE: "[bold green]TRAINED [/]",
