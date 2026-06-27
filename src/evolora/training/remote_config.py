@@ -70,19 +70,7 @@ def build_training_config_payload(
         }
         for example in examples
     ]
-    # VM guy's evaluate.py reads data/evals.json as [{input, expected}], fills "actual"
-    # in place, and we pull it back to score with the LLM-judge. Keep expected as a string.
-    eval_prompts = [
-        {
-            "input": sample.prompt,
-            "expected": (
-                json.dumps(sample.expected, sort_keys=True)
-                if isinstance(sample.expected, (dict, list))
-                else str(sample.expected)
-            ),
-        }
-        for sample in eval_set.samples
-    ]
+    eval_prompts = _eval_records(eval_set)
     results_path = remote_results_path or cfg.remote_results_path
 
     return {
@@ -113,6 +101,64 @@ def build_training_config_payload(
             "results": results_path,
         },
     }
+
+
+def build_baseline_config_payload(
+    *,
+    run_id: str,
+    run_config: RunConfig,
+    eval_set: LockedEvalSet,
+    remote_results_path: str | None = None,
+) -> dict[str, Any]:
+    """Build the VM files for a remote base-model evaluation before training."""
+    cfg = get_config()
+    results_path = remote_results_path or cfg.remote_results_path
+    return {
+        "schema_version": 2,
+        "source": "evolora",
+        "run_id": run_id,
+        "iteration": 0,
+        "task_name": run_config.task_name,
+        "goal": run_config.goal,
+        "base_model_id": run_config.base_model_id,
+        "training_backend": run_config.training_backend,
+        "target_adapter_name": "base-model",
+        "vm_config": {
+            "base_model_id": run_config.base_model_id,
+        },
+        "training_data": [],
+        "training_example_count": 0,
+        "training_data_rationale": "baseline evaluation only",
+        "focus_areas": [],
+        "remote_results_path": results_path,
+        "eval_prompts": _eval_records(eval_set),
+        "eval_set": {
+            "hash": eval_set.hash,
+            "prompt_count": len(eval_set),
+        },
+        "paths": {
+            "config": cfg.remote_config_path or DEFAULT_REMOTE_CONFIG_PATH,
+            "training_data": DEFAULT_REMOTE_TRAINING_DATA_PATH,
+            "evals": DEFAULT_REMOTE_EVALS_PATH,
+            "results": results_path,
+        },
+    }
+
+
+def _eval_records(eval_set: LockedEvalSet) -> list[dict[str, str]]:
+    # VM guy's evaluate.py reads data/evals.json as [{input, expected}], fills "actual"
+    # in place, and we pull it back to score with the LLM-judge. Keep expected as a string.
+    return [
+        {
+            "input": sample.prompt,
+            "expected": (
+                json.dumps(sample.expected, sort_keys=True)
+                if isinstance(sample.expected, (dict, list))
+                else str(sample.expected)
+            ),
+        }
+        for sample in eval_set.samples
+    ]
 
 
 def push_config(

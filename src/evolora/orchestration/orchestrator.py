@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
@@ -27,7 +28,10 @@ from evolora.orchestration.retrain_advisor import RetrainAdvisor
 from evolora.persistence.artifacts import ArtifactStore, LocalArtifactStore
 from evolora.persistence.store import RunStore, get_run_store
 from evolora.training.backends import MockTrainingBackend, TrainingBackend
-from evolora.training.remote_config import build_training_config_payload
+from evolora.training.remote_config import (
+    build_baseline_config_payload,
+    build_training_config_payload,
+)
 from evolora.training.runner import MockModelRunner, ModelRunner
 
 
@@ -97,6 +101,7 @@ class Orchestrator:
         # When the user supplied a goal and the agent can generate evals, MiniMax
         # produces a goal-specific objective eval set; we score it with the generic
         # evaluator and skip the demo adaptive set (which is customer-spending).
+        generated_eval_records: list[dict[str, str]] | None = None
         if rec.config.goal and isinstance(self._planner, MiniMaxPlanner):
             yield await emit(EventKind.STATUS_CHANGED, f"MiniMax generating evals for goal: {rec.config.goal[:60]}")
             try:
@@ -109,9 +114,30 @@ class Orchestrator:
                     self._eval_set = LockedEvalSet(samples)
                     self._evaluator = GenericEvaluator()
                     self._adaptive_set = None
+                    generated_eval_records = self._eval_records_for_approval(samples)
                     yield await emit(EventKind.LOG, f"MiniMax generated {len(samples)} goal-specific eval examples")
             except Exception as exc:  # pragma: no cover - defensive; fall back to default eval set
                 yield await emit(EventKind.LOG, f"Eval generation failed, using default eval set ({exc})")
+
+        if generated_eval_records:
+            self._approval_future = asyncio.get_running_loop().create_future()
+            yield await emit(
+                EventKind.EVAL_APPROVAL_REQUIRED,
+                f"Approve {len(generated_eval_records)} generated eval examples?",
+                evals=generated_eval_records,
+            )
+            approved = await self._approval_future
+            self._approval_future = None
+            yield await emit(
+                EventKind.USER_APPROVAL_RECEIVED,
+                "User approved generated eval set" if approved else "User declined generated eval set",
+                approved=approved,
+                approval_type="evals",
+            )
+            if self._cancelled or not approved:
+                self._cancelled = True
+                yield await self._finish(rec, RunStatus.CANCELLED, StopReason.CANCELLED, emit)
+                return
 
         # --- LOCK EVAL SET ---
         rec.status = RunStatus.LOCKING_EVAL
@@ -122,7 +148,33 @@ class Orchestrator:
         # --- BASELINE ---
         rec.status = RunStatus.BASELINE
         yield await emit(EventKind.STATUS_CHANGED, "Running baseline evaluation")
-        baseline_score, _, _ = await self._eval(adapter_path=None)
+        if rec.config.training_backend == "remote" and callable(getattr(self._backend, "evaluate_base", None)):
+            try:
+                baseline_payload = build_baseline_config_payload(
+                    run_id=rid,
+                    run_config=rec.config,
+                    eval_set=self._eval_set,
+                )
+                remote_baseline_records = None
+                baseline_stream = await self._backend.evaluate_base(baseline_payload)  # type: ignore[attr-defined]
+                async for progress in baseline_stream:
+                    if progress.get("done"):
+                        remote_baseline_records = progress.get("eval_records")
+                        continue
+                    message = str(progress.get("message", "")).strip()
+                    if message:
+                        phase = str(progress.get("phase", "baseline"))
+                        yield await emit(EventKind.LOG, f"[remote:{phase}] {message}")
+                if remote_baseline_records is None:
+                    raise RuntimeError("Remote baseline did not return eval records")
+                baseline_score, _, _ = await self._judge_remote_evals(remote_baseline_records)
+            except Exception as exc:
+                rec.error = str(exc)
+                yield await emit(EventKind.LOG, f"Remote baseline failed: {exc}")
+                yield await self._finish(rec, RunStatus.FAILED, StopReason.BACKEND_UNAVAILABLE, emit)
+                return
+        else:
+            baseline_score, _, _ = await self._eval(adapter_path=None)
         rec.baseline_score = baseline_score
         rec.best_score = baseline_score
         yield await emit(EventKind.BASELINE_COMPLETE, f"Baseline score: {baseline_score:.3f}", score=baseline_score)
@@ -206,7 +258,12 @@ class Orchestrator:
                         train_duration = progress.get("duration_s", 0.0)
                         remote_eval_records = progress.get("eval_records")
                     else:
-                        yield await emit(EventKind.TRAINING_PROGRESS, "", **{k: v for k, v in progress.items() if k != "done"})
+                        message = str(progress.get("message", "")).strip()
+                        if message and "step" not in progress and "loss" not in progress:
+                            phase = str(progress.get("phase", "remote"))
+                            yield await emit(EventKind.LOG, f"[remote:{phase}] {message}")
+                        else:
+                            yield await emit(EventKind.TRAINING_PROGRESS, "", **{k: v for k, v in progress.items() if k != "done"})
             except Exception as exc:
                 train_error = str(exc)
 
@@ -421,6 +478,22 @@ class Orchestrator:
                 model=cfg.digital_ocean_judge_model,
             )
         return self._llm_judge
+
+    def _eval_records_for_approval(self, samples: list[EvalSample]) -> list[dict[str, str]]:
+        records: list[dict[str, str]] = []
+        for sample in samples:
+            expected = sample.expected
+            records.append(
+                {
+                    "input": sample.prompt,
+                    "expected": (
+                        json.dumps(expected, sort_keys=True)
+                        if isinstance(expected, (dict, list))
+                        else str(expected)
+                    ),
+                }
+            )
+        return records
 
     async def _judge_remote_evals(
         self, records: list[dict]

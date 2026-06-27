@@ -19,6 +19,7 @@ from evolora.training.remote_config import (
     DEFAULT_REMOTE_CONFIG_PATH,
     DEFAULT_REMOTE_EVALS_PATH,
     DEFAULT_REMOTE_TRAINING_DATA_PATH,
+    build_baseline_config_payload,
     build_training_config_payload,
     push_config,
     render_remote_files,
@@ -97,6 +98,31 @@ def test_render_remote_files_matches_vm_contract() -> None:
     assert training_rows == [
         {"instruction": "strict JSON", "input": "p", "output": '{"ok": true}'}
     ]
+    assert evals
+    assert set(evals[0]) == {"input", "expected"}
+
+
+def test_build_baseline_config_payload_renders_base_model_eval_files() -> None:
+    cfg = RunConfig(
+        run_id="run-1",
+        training_backend="remote",
+        base_model_id="unsloth/Phi-3-mini-4k-instruct",
+        goal="strict JSON",
+    )
+    payload = build_baseline_config_payload(
+        run_id=cfg.run_id,
+        run_config=cfg,
+        eval_set=LOCKED_EVAL_SET,
+        remote_results_path="/workspace/generations/results.json",
+    )
+
+    files = render_remote_files(payload, remote_config_path="/workspace/config.json")
+    vm_config = json.loads(files[DEFAULT_REMOTE_CONFIG_PATH])
+    evals = json.loads(files[DEFAULT_REMOTE_EVALS_PATH])
+
+    assert payload["iteration"] == 0
+    assert vm_config == {"base_model_id": "unsloth/Phi-3-mini-4k-instruct"}
+    assert files[DEFAULT_REMOTE_TRAINING_DATA_PATH] == ""
     assert evals
     assert set(evals[0]) == {"input", "expected"}
 

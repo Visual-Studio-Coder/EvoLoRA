@@ -21,6 +21,7 @@ class EventKind(StrEnum):
     PLANNING_STARTED = "planning_started"
     PLAN_RECEIVED = "plan_received"
     AGENT_FALLBACK_USED = "agent_fallback_used"
+    EVAL_APPROVAL_REQUIRED = "eval_approval_required"
     VALIDATION_COMPLETE = "validation_complete"
     TRAINING_STARTED = "training_started"
     TRAINING_PROGRESS = "training_progress"

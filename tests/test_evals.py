@@ -14,6 +14,7 @@ from evolora.models.core import (
     RunConfig,
     TrainingDataSpec,
 )
+from evolora.models.events import EventKind
 from evolora.orchestration.orchestrator import Orchestrator
 
 
@@ -97,8 +98,9 @@ async def test_orchestrator_uses_minimax_generated_evals():
     demo = LockedEvalSet([EvalSample(sample_id="demo", prompt="p", expected={"x": 1})])
     orch = Orchestrator(config=cfg, eval_set=demo, planner=_FakePlanner())
 
-    async for _ in await orch.run():
-        pass
+    async for event in await orch.run():
+        if event.kind == EventKind.EVAL_APPROVAL_REQUIRED:
+            orch.submit_retrain_approval(True)
 
     # The demo eval set was replaced by the 2 MiniMax-generated examples,
     # and scoring switched to the generic evaluator.
