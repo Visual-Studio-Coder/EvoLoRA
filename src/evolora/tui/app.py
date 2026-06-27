@@ -373,8 +373,10 @@ class EvoLoRAApp(App[None]):
 
         backend = get_backend(cfg.training_backend)
         runner = get_runner(cfg.model_runner)
+        # Use the real MiniMax tool-calling planner whenever a key is configured — the agent
+        # plans for real even when training stays on the mock backend (real reasoning, mock GPU).
         planner = get_planner(
-            use_minimax=cfg.minimax_available and cfg.training_backend != "mock",
+            use_minimax=cfg.minimax_available,
             api_key=cfg.minimax_api_key,
             model=cfg.minimax_model,
             base_url=cfg.minimax_base_url,
