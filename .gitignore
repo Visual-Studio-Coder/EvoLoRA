@@ -27,6 +27,7 @@ artifacts/
 
 # Local logs and OS files
 *.log
+logs/
 .DS_Store
 
 # Local agent notes
