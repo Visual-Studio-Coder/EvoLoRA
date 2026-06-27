@@ -24,6 +24,7 @@ from evolora.models.core import (
     StopReason,
 )
 from evolora.models.events import Event, EventKind
+from evolora.observability.run_logger import RunLogger
 from evolora.orchestration.retrain_advisor import RetrainAdvisor
 from evolora.persistence.artifacts import ArtifactStore, LocalArtifactStore
 from evolora.persistence.store import RunStore, get_run_store
@@ -56,6 +57,7 @@ class Orchestrator:
         judge: CandidateJudge | None = None,
         retrain_advisor: RetrainAdvisor | None = None,
         llm_judge=None,
+        run_logger: RunLogger | None = None,
     ) -> None:
         self._config = config
         self._eval_set = eval_set
@@ -72,6 +74,7 @@ class Orchestrator:
         self._cancelled = False
         self._approval_future: asyncio.Future[bool] | None = None
         self._record = RunRecord(config=config)
+        self._run_logger = run_logger or RunLogger(self._record.run_id)
 
     def cancel(self) -> None:
         self._cancelled = True
@@ -90,6 +93,7 @@ class Orchestrator:
 
         async def emit(kind: EventKind, msg: str = "", **data) -> Event:
             ev = Event(kind=kind, run_id=rid, iteration=rec.current_iteration(), message=msg, data=data)
+            self._run_logger.log_event(ev)
             return ev
 
         # --- PREPARING ---
@@ -276,6 +280,11 @@ class Orchestrator:
                 train_error = str(exc)
 
             if train_error or artifact is None:
+                yield await emit(
+                    EventKind.LOG,
+                    f"[train] iteration {iteration} failed: "
+                    f"{train_error or 'No artifact produced'}",
+                )
                 it_result = IterationResult(
                     iteration=iteration,
                     plan=validated_plan,
