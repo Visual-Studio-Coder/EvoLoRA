@@ -1,12 +1,13 @@
-from unsloth import FastLanguageModel
-import torch
-from datasets import load_dataset
-from trl import SFTTrainer
-from transformers import TrainingArguments
 import json
 
+import torch
+from datasets import load_dataset
+from transformers import TrainingArguments
+from trl import SFTTrainer
+from unsloth import FastLanguageModel
+
 # ====================== LOAD CONFIG ======================
-with open("config.json", "r") as f:
+with open("config.json") as f:
     config = json.load(f)
 
 learning_rate = config["learning_rate"]

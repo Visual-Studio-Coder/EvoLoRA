@@ -35,20 +35,15 @@ flowchart LR
 
 ## Remote VM Contract
 
-EvoLoRA writes config JSON to `REMOTE_CONFIG_PATH`, defaulting to `~/evolora/config.json`.
+EvoLoRA writes config JSON to `REMOTE_CONFIG_PATH`, defaulting to `/workspace/config.json`.
 
 The config contains:
 
-- `run_id`
-- `iteration`
-- `base_model_id`
-- chosen LoRA hyperparameters
-- validated training examples
-- `eval_prompts`
-- eval-set hash
-- `remote_results_path`
+- `/workspace/config.json`: bare `train.py` hyperparameters such as `learning_rate`, `lora_rank`, `lora_alpha`, `num_train_epochs`, and `per_device_train_batch_size`.
+- `/workspace/data/training_data.jsonl`: Alpaca JSONL rows with `instruction`, `input`, and `output`.
+- `/workspace/data/evals.json`: eval prompts only, with `sample_id`, `instruction`, and `input`.
 
-The VM writes `REMOTE_RESULTS_PATH`, defaulting to `~/evolora/results.json`, as:
+The VM writes `REMOTE_RESULTS_PATH`, defaulting to `/workspace/generations/results.json`, as:
 
 ```json
 {
