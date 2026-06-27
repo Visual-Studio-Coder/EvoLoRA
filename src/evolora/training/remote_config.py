@@ -70,13 +70,18 @@ def build_training_config_payload(
         }
         for example in examples
     ]
+    # VM guy's evaluate.py reads data/evals.json as [{input, expected}], fills "actual"
+    # in place, and we pull it back to score with the LLM-judge. Keep expected as a string.
     eval_prompts = [
         {
-            "sample_id": prompt["sample_id"],
-            "instruction": instruction,
-            "input": prompt["prompt"],
+            "input": sample.prompt,
+            "expected": (
+                json.dumps(sample.expected, sort_keys=True)
+                if isinstance(sample.expected, (dict, list))
+                else str(sample.expected)
+            ),
         }
-        for prompt in eval_set.prompts_only()
+        for sample in eval_set.samples
     ]
     results_path = remote_results_path or cfg.remote_results_path
 
