@@ -12,9 +12,11 @@ from textual.widgets import Button, Input, ProgressBar, RichLog, Static
 from evolora.agent.planner import get_planner
 from evolora.config import get_config
 from evolora.demo.task import ADAPTIVE_EVAL_SET, LOCKED_EVAL_SET
+from evolora.evaluation.digitalocean_judge import get_judge
 from evolora.models.core import RunConfig
 from evolora.models.events import Event, EventKind
 from evolora.orchestration.orchestrator import Orchestrator
+from evolora.orchestration.retrain_advisor import get_retrain_advisor
 from evolora.training.backends import get_backend
 from evolora.training.runner import get_runner
 
@@ -231,6 +233,22 @@ class EvoLoRAApp(App[None]):
         color: #aa5544;
         border: solid #3d1612;
     }
+
+    #approve-retrain-button {
+        min-width: 7;
+        margin: 0 0 0 1;
+        background: #00280d;
+        color: #39ff14;
+        border: solid #006622;
+    }
+
+    #decline-retrain-button {
+        min-width: 6;
+        margin: 0 0 0 1;
+        background: #120606;
+        color: #aa5544;
+        border: solid #3d1612;
+    }
     """
 
     def __init__(self) -> None:
@@ -241,6 +259,7 @@ class EvoLoRAApp(App[None]):
         self._baseline = 0.0
         self._best = 0.0
         self._current = 0.0
+        self._judge_rating: float | None = None
         self._requested_sample_count: int | None = 30
         self._goal = ""
 
@@ -305,6 +324,8 @@ class EvoLoRAApp(App[None]):
                 )
                 yield Button("START", id="start-button")
                 yield Button("CANCEL", id="cancel-button", disabled=True)
+                yield Button("YES", id="approve-retrain-button", disabled=True)
+                yield Button("NO", id="decline-retrain-button", disabled=True)
 
     def on_mount(self) -> None:
         self.set_interval(1, self._update_clock)
@@ -319,6 +340,10 @@ class EvoLoRAApp(App[None]):
             self.action_start_run()
         elif event.button.id == "cancel-button":
             self.action_cancel_run()
+        elif event.button.id == "approve-retrain-button":
+            self.action_answer_retrain(True)
+        elif event.button.id == "decline-retrain-button":
+            self.action_answer_retrain(False)
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id in {"goal-input", "sample-count-input"}:
@@ -341,8 +366,10 @@ class EvoLoRAApp(App[None]):
         self._baseline = 0.0
         self._best = 0.0
         self._current = 0.0
+        self._judge_rating = None
         self.query_one("#start-button", Button).disabled = True
         self.query_one("#cancel-button", Button).disabled = False
+        self._set_retrain_buttons(False)
         self._agent_log().clear()
         self._examples_log().clear()
         if self._goal:
@@ -362,6 +389,14 @@ class EvoLoRAApp(App[None]):
         self._set_state("CANCEL", "cancellation requested")
         self._agent_log().write("[red][!] Cancellation requested[/]")
 
+    def action_answer_retrain(self, approved: bool) -> None:
+        if self._orchestrator is None:
+            return
+        self._orchestrator.submit_retrain_approval(approved)
+        self._set_retrain_buttons(False)
+        answer = "approved" if approved else "declined"
+        self._agent_log().write(f"[yellow][user][/] Retrain {answer}")
+
     async def _run_evolora(self) -> None:
         cfg = get_config()
         run_config = RunConfig(
@@ -374,6 +409,7 @@ class EvoLoRAApp(App[None]):
             base_model_id=cfg.base_model_id,
             training_sample_count=self._requested_sample_count,
             goal=self._goal,
+            require_retrain_approval=True,
         )
 
         backend = get_backend(cfg.training_backend)
@@ -386,6 +422,16 @@ class EvoLoRAApp(App[None]):
             model=cfg.minimax_model,
             base_url=cfg.minimax_base_url,
         )
+        judge = get_judge(
+            api_key=cfg.digital_ocean_model_access_key,
+            base_url=cfg.digitalocean_inference_base_url,
+            model=cfg.digital_ocean_judge_model,
+        )
+        retrain_advisor = get_retrain_advisor(
+            api_key=cfg.minimax_api_key,
+            model=cfg.minimax_model,
+            base_url=cfg.minimax_base_url,
+        )
 
         self._orchestrator = Orchestrator(
             config=run_config,
@@ -394,6 +440,8 @@ class EvoLoRAApp(App[None]):
             training_backend=backend,
             model_runner=runner,
             adaptive_eval_set=ADAPTIVE_EVAL_SET,
+            judge=judge,
+            retrain_advisor=retrain_advisor,
         )
 
         try:
@@ -406,6 +454,7 @@ class EvoLoRAApp(App[None]):
             self._run_active = False
             self.query_one("#start-button", Button).disabled = False
             self.query_one("#cancel-button", Button).disabled = True
+            self._set_retrain_buttons(False)
             self._update_examples_from_record()
 
     def _apply_event(self, event: Event) -> None:
@@ -496,6 +545,54 @@ class EvoLoRAApp(App[None]):
 
         if kind == EventKind.ADAPTIVE_COMPLETE:
             self._agent_log().write(f"[green][diag][/] Adaptive challenge score: {float(data.get('score', 0.0)):.3f}")
+            return
+
+        if kind == EventKind.JUDGE_STARTED:
+            self._set_state("JUDGE", event.message)
+            self._agent_log().write(f"[cyan][>][/] {event.message}")
+            return
+
+        if kind == EventKind.JUDGE_COMPLETE:
+            self._judge_rating = float(data.get("rating", 0.0))
+            source = str(data.get("source", "judge"))
+            mode = "mock/fallback" if data.get("is_mock") else "real"
+            summary = str(data.get("summary", "")).strip()
+            self._set_state("JUDGED", f"{mode} judge rating {self._judge_rating:.2f}")
+            self._agent_log().write(
+                f"[cyan][judge][/] {mode} {source} rating: [bold]{self._judge_rating:.2f}[/]"
+            )
+            if summary:
+                self._examples_log().write(f"[cyan]judge summary[/]: {summary}")
+            for weakness in data.get("weaknesses", [])[:3]:
+                self._examples_log().write(f"[yellow]judge focus[/]: {weakness}")
+            self._update_metrics_panel()
+            return
+
+        if kind == EventKind.RETRAIN_DECISION_RECEIVED:
+            recommendation = "retrain" if data.get("retrain_recommended") else "stop"
+            actor = "heuristic advisor" if data.get("is_mock") else "MiniMax"
+            reason = str(data.get("reason", "")).strip()
+            self._set_state("DECIDE", f"{actor} recommends {recommendation}")
+            self._agent_log().write(
+                f"[yellow][decision][/] {actor} recommends [bold]{recommendation}[/]"
+            )
+            if reason:
+                self._examples_log().write(f"[yellow]decision reason[/]: {reason}")
+            return
+
+        if kind == EventKind.USER_APPROVAL_REQUIRED:
+            rating = float(data.get("rating", 0.0))
+            self._set_state("APPROVE", f"Retrain? judge rating {rating:.2f} | YES or NO")
+            self._agent_log().write(
+                f"[yellow][?][/] Retraining is recommended. Judge rating: [bold]{rating:.2f}[/]. Choose YES or NO."
+            )
+            self._set_retrain_buttons(True)
+            return
+
+        if kind == EventKind.USER_APPROVAL_RECEIVED:
+            approved = bool(data.get("approved", False))
+            self._set_state("APPROVED" if approved else "DECLINED", event.message)
+            self._set_retrain_buttons(False)
             return
 
         if kind == EventKind.BEST_UPDATED:
@@ -609,6 +706,7 @@ class EvoLoRAApp(App[None]):
                 f"[#004018]baseline[/]    [#00cc33]{self._baseline:.3f}[/]",
                 f"[#004018]current[/]     [#00cc33]{self._current:.3f}[/]",
                 f"[#004018]best[/]        [#39ff14]{self._best:.3f}[/]",
+                f"[#004018]judge[/]       [#39ff14]{self._judge_rating:.3f}[/]" if self._judge_rating is not None else "[#004018]judge[/]       [#003010]--[/]",
             ]
         )
         self.query_one("#metrics-values", Static).update(content)
@@ -631,6 +729,10 @@ class EvoLoRAApp(App[None]):
     def _set_state(self, state: str, detail: str) -> None:
         self.query_one("#run-state", Static).update(state)
         self.query_one("#status-text", Static).update(detail)
+
+    def _set_retrain_buttons(self, enabled: bool) -> None:
+        self.query_one("#approve-retrain-button", Button).disabled = not enabled
+        self.query_one("#decline-retrain-button", Button).disabled = not enabled
 
     def _parse_sample_count(self) -> int | None:
         raw = self.query_one("#sample-count-input", Input).value.strip()

@@ -38,6 +38,8 @@ class Config(BaseModel):
     digitalocean_inference_base_url: str = Field(
         default="https://inference.do-ai.run/v1/"
     )
+    digital_ocean_model_access_key: str = Field(default="")
+    digital_ocean_judge_model: str = Field(default="llama3.3-70b-instruct")
     digitalocean_token: str = Field(default="")
 
     @property
@@ -51,6 +53,10 @@ class Config(BaseModel):
     @property
     def mongo_available(self) -> bool:
         return bool(self.mongodb_uri)
+
+    @property
+    def digital_ocean_judge_available(self) -> bool:
+        return bool(self.digital_ocean_model_access_key)
 
 
 @lru_cache(maxsize=1)
@@ -71,6 +77,10 @@ def get_config() -> Config:
         patience=int(os.getenv("PATIENCE", "2")),
         digitalocean_inference_base_url=os.getenv(
             "DIGITAL_OCEAN_INFERENCE_BASE_URL", "https://inference.do-ai.run/v1/"
+        ),
+        digital_ocean_model_access_key=os.getenv("DIGITAL_OCEAN_MODEL_ACCESS_KEY", ""),
+        digital_ocean_judge_model=os.getenv(
+            "DIGITAL_OCEAN_JUDGE_MODEL", "llama3.3-70b-instruct"
         ),
         base_model_id=os.getenv("BASE_MODEL_ID", "microsoft/Phi-3-mini-128k-instruct"),
         digitalocean_token=os.getenv("DIGITALOCEAN_TOKEN", ""),

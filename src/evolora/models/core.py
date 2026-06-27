@@ -46,6 +46,8 @@ class StopReason(StrEnum):
     EVAL_HASH_CHANGED = "eval_hash_changed"
     CANCELLED = "cancelled"
     BACKEND_UNAVAILABLE = "backend_unavailable"
+    JUDGE_ACCEPTED = "judge_accepted"
+    USER_DECLINED_RETRAIN = "user_declined_retrain"
 
 
 # ---------------------------------------------------------------------------
@@ -125,6 +127,25 @@ class EvalResult(BaseModel):
     latency_ms: float = Field(default=0.0)
 
 
+class JudgeReport(BaseModel):
+    rating: float = Field(ge=0.0, le=1.0)
+    summary: str = Field(default="")
+    strengths: list[str] = Field(default_factory=list)
+    weaknesses: list[str] = Field(default_factory=list)
+    recommended_focus: list[str] = Field(default_factory=list)
+    source: str = Field(default="heuristic")
+    is_mock: bool = True
+
+
+class RetrainDecision(BaseModel):
+    retrain_recommended: bool = False
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    reason: str = Field(default="")
+    suggested_focus: list[str] = Field(default_factory=list)
+    source: str = Field(default="heuristic")
+    is_mock: bool = True
+
+
 class ArtifactMeta(BaseModel):
     artifact_id: str = Field(default_factory=_run_id)
     run_id: str
@@ -145,6 +166,8 @@ class IterationResult(BaseModel):
     eval_results: list[EvalResult] = Field(default_factory=list)
     score: float = Field(default=0.0, ge=0.0, le=1.0)
     adaptive_score: float | None = None
+    judge_report: JudgeReport | None = None
+    retrain_decision: RetrainDecision | None = None
     artifact: ArtifactMeta | None = None
     stop_reason: StopReason | None = None
     error: str | None = None
@@ -173,6 +196,7 @@ class RunConfig(BaseModel):
     model_runner: str = Field(default="mock")
     base_model_id: str = Field(default="microsoft/Phi-3-mini-128k-instruct")
     training_sample_count: int | None = Field(default=30, ge=1, le=500)
+    require_retrain_approval: bool = Field(default=False)
     created_at: datetime = Field(default_factory=_now)
 
 

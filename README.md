@@ -18,8 +18,9 @@ EvoLoRA makes the loop visible:
 - every improvement attempt has a plan
 - training data and LoRA settings are validated before use
 - evaluation happens against a locked benchmark
+- DigitalOcean can review the trained adapter as an LLM judge, then MiniMax decides whether another iteration is worth asking the user for
 - fallback mode works with no API keys
-- the loop stops for explicit reasons: target score, max iterations, patience, cancellation, eval tampering, or failure
+- the loop stops for explicit reasons: target score, max iterations, patience, judge acceptance, user-declined retrain, cancellation, eval tampering, or failure
 
 ## Demo Flow
 
@@ -29,7 +30,10 @@ EvoLoRA makes the loop visible:
 4. Validate the generated training examples and LoRA hyperparameters.
 5. Train Phi-3-mini-128k-instruct with the mock backend by default.
 6. Evaluate the adapter on the locked benchmark.
-7. Preserve the best result and repeat until a stop condition is reached.
+7. Run a DigitalOcean LLM judge when `DIGITAL_OCEAN_MODEL_ACCESS_KEY` is set; otherwise use a labeled heuristic judge.
+8. Send the judge rating and summary to MiniMax for a retrain/stop recommendation.
+9. In the TUI, ask the user before retraining when MiniMax recommends another round.
+10. Preserve the best result and repeat until a stop condition is reached.
 
 ## What Is Built
 
@@ -39,6 +43,8 @@ EvoLoRA makes the loop visible:
 - `evolora smoke-minimax`: MiniMax connectivity check when `MINIMAX_API_KEY` is set
 - Mock training backend that simulates Phi specialization locally with no GPU
 - MiniMax planner through the OpenAI SDK, with heuristic fallback
+- DigitalOcean judge through the OpenAI-compatible Inference endpoint, with heuristic fallback
+- MiniMax retrain decision after the judge report, with user approval controls in the TUI
 - Locked evaluation set and objective JSON scorer
 - In-memory run store and local artifact store
 - Optional exact training sample count; blank means the planner chooses, a number means Python enforces that count
@@ -85,6 +91,9 @@ Key variables:
 - `MINIMAX_API_KEY`: enables live MiniMax planning
 - `MINIMAX_MODEL`: defaults to `MiniMax-M2.7-highspeed`
 - `MINIMAX_BASE_URL`: defaults to `https://api.minimax.io/v1`
+- `DIGITAL_OCEAN_MODEL_ACCESS_KEY`: enables the real DigitalOcean judge
+- `DIGITAL_OCEAN_INFERENCE_BASE_URL`: defaults to `https://inference.do-ai.run/v1/`
+- `DIGITAL_OCEAN_JUDGE_MODEL`: defaults to `llama3.3-70b-instruct`
 - `BASE_MODEL_ID`: defaults to `microsoft/Phi-3-mini-128k-instruct`
 - `MONGODB_URI`: future persistent run history
 - `TRAINING_BACKEND`: `mock` by default; `unsloth` and `remote` are optional paths
@@ -112,7 +121,7 @@ artifacts/            Ignored runtime outputs
 
 ## Boundaries
 
-Mock mode is real and supported. Live MiniMax planning is optional. Real Unsloth or remote GPU training should stay clearly labeled until it is smoke-tested. Do not commit `.env`, generated adapters, checkpoints, or secrets.
+Mock mode is real and supported. Live MiniMax planning and live DigitalOcean judging are optional. When the DigitalOcean model access key is missing or the call fails, EvoLoRA labels the judge result as a heuristic fallback. Real Unsloth or remote GPU training should stay clearly labeled until it is smoke-tested. Do not commit `.env`, generated adapters, checkpoints, or secrets.
 
 ## Current Status
 

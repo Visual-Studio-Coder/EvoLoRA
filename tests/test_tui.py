@@ -82,6 +82,7 @@ async def test_tui_default_sample_count_and_goal_feed_run_config(
 
     assert config.training_sample_count == 30
     assert config.goal == "summarize customer spend as strict JSON"
+    assert config.require_retrain_approval is True
 
 
 @pytest.mark.asyncio

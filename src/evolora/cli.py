@@ -30,6 +30,11 @@ def doctor() -> None:
 
     row("Python >= 3.11", sys.version_info >= (3, 11), sys.version.split()[0])
     row("MINIMAX_API_KEY", cfg.minimax_available, "set" if cfg.minimax_available else "not set — mock mode")
+    row(
+        "DIGITAL_OCEAN_MODEL_ACCESS_KEY",
+        cfg.digital_ocean_judge_available,
+        "set" if cfg.digital_ocean_judge_available else "not set — heuristic judge",
+    )
     row("MONGODB_URI", cfg.mongo_available, "set" if cfg.mongo_available else "not set — in-memory")
     row("TRAINING_BACKEND", True, cfg.training_backend)
     row("MODEL_RUNNER", True, cfg.model_runner)
@@ -39,6 +44,8 @@ def doctor() -> None:
 
     if not cfg.minimax_available:
         console.print("[yellow]MiniMax not configured — heuristic planner will be used.[/yellow]")
+    if not cfg.digital_ocean_judge_available:
+        console.print("[yellow]DigitalOcean judge not configured — heuristic judge will be used.[/yellow]")
     if not cfg.mongo_available:
         console.print("[yellow]MongoDB not configured — using in-memory store.[/yellow]")
 
@@ -58,8 +65,10 @@ async def _demo(mock: bool, iterations: int) -> None:
     from evolora.agent.planner import get_planner
     from evolora.config import get_config
     from evolora.demo.task import ADAPTIVE_EVAL_SET, LOCKED_EVAL_SET
+    from evolora.evaluation.digitalocean_judge import get_judge
     from evolora.models.core import RunConfig
     from evolora.orchestration.orchestrator import Orchestrator
+    from evolora.orchestration.retrain_advisor import get_retrain_advisor
     from evolora.training.backends import get_backend
     from evolora.training.runner import get_runner
 
@@ -83,6 +92,16 @@ async def _demo(mock: bool, iterations: int) -> None:
         model=cfg.minimax_model,
         base_url=cfg.minimax_base_url,
     )
+    judge = get_judge(
+        api_key=cfg.digital_ocean_model_access_key,
+        base_url=cfg.digitalocean_inference_base_url,
+        model=cfg.digital_ocean_judge_model,
+    )
+    retrain_advisor = get_retrain_advisor(
+        api_key=cfg.minimax_api_key if not mock else "",
+        model=cfg.minimax_model,
+        base_url=cfg.minimax_base_url,
+    )
 
     orch = Orchestrator(
         config=run_config,
@@ -91,6 +110,8 @@ async def _demo(mock: bool, iterations: int) -> None:
         training_backend=backend,
         model_runner=runner,
         adaptive_eval_set=ADAPTIVE_EVAL_SET,
+        judge=judge,
+        retrain_advisor=retrain_advisor,
     )
 
     mode = "[yellow][MOCK][/yellow]" if mock else "[cyan][REAL][/cyan]"
@@ -117,6 +138,11 @@ def _print_event(event) -> None:
         EventKind.TRAINING_COMPLETE: "[bold green]TRAINED [/]",
         EventKind.EVAL_COMPLETE: "[bold blue]EVAL    [/]",
         EventKind.ADAPTIVE_COMPLETE: "[bold]ADAPTIVE[/]",
+        EventKind.JUDGE_STARTED: "[bold cyan]JUDGE   [/]",
+        EventKind.JUDGE_COMPLETE: "[bold cyan]JUDGED  [/]",
+        EventKind.RETRAIN_DECISION_RECEIVED: "[bold yellow]DECIDE  [/]",
+        EventKind.USER_APPROVAL_REQUIRED: "[bold yellow]APPROVE [/]",
+        EventKind.USER_APPROVAL_RECEIVED: "[bold yellow]ANSWER  [/]",
         EventKind.ITERATION_COMPLETE: "[bold]ITER    [/]",
         EventKind.BEST_UPDATED: "[bold green]BEST    [/]",
         EventKind.STOP_CONDITION_MET: "[bold red]STOP    [/]",

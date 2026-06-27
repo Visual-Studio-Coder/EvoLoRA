@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
 from evolora.agent.planner import HeuristicPlanner, MiniMaxPlanner
+from evolora.evaluation.digitalocean_judge import CandidateJudge
 from evolora.evaluation.evaluator import GenericEvaluator, ObjectiveEvaluator
 from evolora.evaluation.locked import LockedEvalSet
 from evolora.models.core import (
@@ -14,12 +16,14 @@ from evolora.models.core import (
     EvalResult,
     EvalSample,
     IterationResult,
+    RetrainDecision,
     RunConfig,
     RunRecord,
     RunStatus,
     StopReason,
 )
 from evolora.models.events import Event, EventKind
+from evolora.orchestration.retrain_advisor import RetrainAdvisor
 from evolora.persistence.artifacts import ArtifactStore, LocalArtifactStore
 from evolora.persistence.store import InMemoryRunStore, RunStore
 from evolora.training.backends import MockTrainingBackend, TrainingBackend
@@ -44,6 +48,8 @@ class Orchestrator:
         run_store: RunStore | None = None,
         artifact_store: ArtifactStore | None = None,
         adaptive_eval_set: LockedEvalSet | None = None,
+        judge: CandidateJudge | None = None,
+        retrain_advisor: RetrainAdvisor | None = None,
     ) -> None:
         self._config = config
         self._eval_set = eval_set
@@ -51,14 +57,22 @@ class Orchestrator:
         self._planner = planner or HeuristicPlanner()
         self._backend = training_backend or MockTrainingBackend()
         self._runner = model_runner or MockModelRunner()
+        self._judge = judge
+        self._retrain_advisor = retrain_advisor
         self._store = run_store or InMemoryRunStore()
         self._artifacts = artifact_store or LocalArtifactStore("./artifacts")
         self._evaluator = ObjectiveEvaluator()
         self._cancelled = False
+        self._approval_future: asyncio.Future[bool] | None = None
         self._record = RunRecord(config=config)
 
     def cancel(self) -> None:
         self._cancelled = True
+        self.submit_retrain_approval(False)
+
+    def submit_retrain_approval(self, approved: bool) -> None:
+        if self._approval_future is not None and not self._approval_future.done():
+            self._approval_future.set_result(approved)
 
     async def run(self) -> AsyncIterator[Event]:
         return self._run()
@@ -105,7 +119,7 @@ class Orchestrator:
         # --- BASELINE ---
         rec.status = RunStatus.BASELINE
         yield await emit(EventKind.STATUS_CHANGED, "Running baseline evaluation")
-        baseline_score, _ = await self._eval(adapter_path=None)
+        baseline_score, _, _ = await self._eval(adapter_path=None)
         rec.baseline_score = baseline_score
         rec.best_score = baseline_score
         yield await emit(EventKind.BASELINE_COMPLETE, f"Baseline score: {baseline_score:.3f}", score=baseline_score)
@@ -210,7 +224,7 @@ class Orchestrator:
                 yield await self._finish(rec, RunStatus.FAILED, StopReason.EVAL_HASH_CHANGED, emit)
                 return
 
-            score, eval_results = await self._eval(adapter_path=artifact.adapter_path)
+            score, eval_results, eval_responses = await self._eval(adapter_path=artifact.adapter_path)
             artifact = artifact.model_copy(update={"score": score})
             yield await emit(EventKind.EVAL_COMPLETE, f"Eval score: {score:.3f}", score=score)
 
@@ -218,9 +232,62 @@ class Orchestrator:
             adaptive_score = None
             if self._adaptive_set:
                 rec.status = RunStatus.ADAPTIVE
-                a_score, _ = await self._eval(adapter_path=artifact.adapter_path, eval_set=self._adaptive_set)
+                a_score, _, _ = await self._eval(adapter_path=artifact.adapter_path, eval_set=self._adaptive_set)
                 adaptive_score = a_score
                 yield await emit(EventKind.ADAPTIVE_COMPLETE, f"Adaptive score: {a_score:.3f}", score=a_score)
+
+            judge_report = None
+            retrain_decision: RetrainDecision | None = None
+            if self._judge is not None:
+                source = "heuristic" if self._judge.is_mock else "DigitalOcean"
+                yield await emit(EventKind.JUDGE_STARTED, f"{source} judge reviewing iteration {iteration}")
+                judge_report = await self._judge.judge(
+                    goal=rec.config.goal,
+                    task_name=rec.config.task_name,
+                    base_model_id=rec.config.base_model_id,
+                    iteration=iteration,
+                    score=score,
+                    adaptive_score=adaptive_score,
+                    plan=validated_plan,
+                    eval_results=eval_results,
+                    responses=eval_responses,
+                )
+                yield await emit(
+                    EventKind.JUDGE_COMPLETE,
+                    f"Judge rating: {judge_report.rating:.2f}",
+                    rating=judge_report.rating,
+                    summary=judge_report.summary,
+                    strengths=judge_report.strengths,
+                    weaknesses=judge_report.weaknesses,
+                    recommended_focus=judge_report.recommended_focus,
+                    source=judge_report.source,
+                    is_mock=judge_report.is_mock,
+                )
+
+                if self._retrain_advisor is not None:
+                    retrain_decision = await self._retrain_advisor.decide(
+                        goal=rec.config.goal or rec.config.task_name,
+                        rating=judge_report.rating,
+                        target_score=rec.config.target_score,
+                        iteration=iteration,
+                        max_iterations=rec.config.max_iterations,
+                        judge_report=judge_report,
+                    )
+                    advisor_name = "heuristic advisor" if retrain_decision.is_mock else "MiniMax"
+                    yield await emit(
+                        EventKind.RETRAIN_DECISION_RECEIVED,
+                        (
+                            f"{advisor_name} recommends retrain"
+                            if retrain_decision.retrain_recommended
+                            else f"{advisor_name} accepts current adapter"
+                        ),
+                        retrain_recommended=retrain_decision.retrain_recommended,
+                        confidence=retrain_decision.confidence,
+                        reason=retrain_decision.reason,
+                        suggested_focus=retrain_decision.suggested_focus,
+                        source=retrain_decision.source,
+                        is_mock=retrain_decision.is_mock,
+                    )
 
             # --- RECORD ITERATION ---
             it_result = IterationResult(
@@ -232,6 +299,8 @@ class Orchestrator:
                 eval_results=eval_results,
                 score=score,
                 adaptive_score=adaptive_score,
+                judge_report=judge_report,
+                retrain_decision=retrain_decision,
                 artifact=artifact,
                 started_at=_now(),
                 finished_at=_now(),
@@ -248,6 +317,50 @@ class Orchestrator:
             yield await emit(EventKind.ITERATION_COMPLETE, f"Iteration {iteration} done: {score:.3f}", score=score, best=rec.best_score)
             await self._store.save(rec)
 
+            if retrain_decision is not None and not retrain_decision.retrain_recommended:
+                advisor_name = "heuristic advisor" if retrain_decision.is_mock else "MiniMax"
+                yield await emit(
+                    EventKind.STOP_CONDITION_MET,
+                    f"Stop: {advisor_name} accepted the current adapter after judge review",
+                    reason=StopReason.JUDGE_ACCEPTED.value,
+                )
+                yield await self._finish(rec, RunStatus.COMPLETE, StopReason.JUDGE_ACCEPTED, emit)
+                return
+
+            if (
+                retrain_decision is not None
+                and retrain_decision.retrain_recommended
+                and iteration < rec.config.max_iterations
+                and rec.config.require_retrain_approval
+            ):
+                self._approval_future = asyncio.get_running_loop().create_future()
+                yield await emit(
+                    EventKind.USER_APPROVAL_REQUIRED,
+                    f"Approve another training round? Judge rating {judge_report.rating:.2f}",
+                    rating=judge_report.rating if judge_report else score,
+                    summary=judge_report.summary if judge_report else "",
+                    reason=retrain_decision.reason,
+                    suggested_focus=retrain_decision.suggested_focus,
+                )
+                approved = await self._approval_future
+                self._approval_future = None
+                yield await emit(
+                    EventKind.USER_APPROVAL_RECEIVED,
+                    "User approved retrain" if approved else "User declined retrain",
+                    approved=approved,
+                )
+                if self._cancelled:
+                    yield await self._finish(rec, RunStatus.CANCELLED, StopReason.CANCELLED, emit)
+                    return
+                if not approved:
+                    yield await self._finish(
+                        rec,
+                        RunStatus.COMPLETE,
+                        StopReason.USER_DECLINED_RETRAIN,
+                        emit,
+                    )
+                    return
+
             # --- STOP CONDITIONS ---
             stop = self._check_stop(rec, score)
             if stop:
@@ -259,11 +372,12 @@ class Orchestrator:
 
     async def _eval(
         self, adapter_path: str | None, eval_set: LockedEvalSet | None = None
-    ) -> tuple[float, list[EvalResult]]:
+    ) -> tuple[float, list[EvalResult], dict[str, str]]:
         es = eval_set or self._eval_set
         prompts = es.prompts_only()
         responses = await self._runner.run_batch(prompts, adapter_path=adapter_path)
-        return self._evaluator(es.samples, responses)
+        score, results = self._evaluator(es.samples, responses)
+        return score, results, responses
 
     async def _plan(
         self,
