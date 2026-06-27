@@ -6,6 +6,7 @@ from evolora.demo.task import ADAPTIVE_EVAL_SET, LOCKED_EVAL_SET
 from evolora.models.core import JudgeReport, RetrainDecision, RunConfig, RunStatus, StopReason
 from evolora.models.events import EventKind
 from evolora.orchestration.orchestrator import Orchestrator
+from evolora.persistence.store import InMemoryRunStore
 
 
 async def _collect(orch: Orchestrator) -> tuple[list, object]:
@@ -19,7 +20,12 @@ def _make_orch(**kwargs) -> Orchestrator:
     defaults = dict(max_iterations=2, target_score=0.99, patience=5)
     defaults.update(kwargs)
     cfg = RunConfig(**defaults)
-    return Orchestrator(config=cfg, eval_set=LOCKED_EVAL_SET, adaptive_eval_set=ADAPTIVE_EVAL_SET)
+    return Orchestrator(
+        config=cfg,
+        eval_set=LOCKED_EVAL_SET,
+        adaptive_eval_set=ADAPTIVE_EVAL_SET,
+        run_store=InMemoryRunStore(),
+    )
 
 
 class StaticJudge:

@@ -23,6 +23,13 @@ class Config(BaseModel):
     model_runner: str = Field(default="mock")       # mock | local | remote
     base_model_id: str = Field(default="microsoft/Phi-3-mini-128k-instruct")
 
+    # Remote GPU config push
+    ssh_host: str = Field(default="")
+    ssh_user: str = Field(default="")
+    ssh_port: int = Field(default=22)
+    ssh_key_path: str = Field(default="")
+    remote_config_path: str = Field(default="~/evolora/config.json")
+
     # Persistence
     mongodb_uri: str = Field(default="")
     mongodb_db_name: str = Field(default="evolora")
@@ -71,6 +78,11 @@ def get_config() -> Config:
         minimax_group_id=os.getenv("MINIMAX_GROUP_ID", ""),
         training_backend=os.getenv("TRAINING_BACKEND", "mock"),
         model_runner=os.getenv("MODEL_RUNNER", "mock"),
+        ssh_host=os.getenv("SSH_HOST", ""),
+        ssh_user=os.getenv("SSH_USER", ""),
+        ssh_port=int(os.getenv("SSH_PORT", "22")),
+        ssh_key_path=os.getenv("SSH_KEY_PATH", ""),
+        remote_config_path=os.getenv("REMOTE_CONFIG_PATH", "~/evolora/config.json"),
         mongodb_uri=os.getenv("MONGODB_URI", ""),
         mongodb_db_name=os.getenv("MONGODB_DB_NAME", "evolora"),
         mongodb_runs_collection=os.getenv("MONGODB_RUNS_COLLECTION", "runs"),

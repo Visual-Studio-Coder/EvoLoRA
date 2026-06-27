@@ -27,6 +27,7 @@ from evolora.orchestration.retrain_advisor import RetrainAdvisor
 from evolora.persistence.artifacts import ArtifactStore, LocalArtifactStore
 from evolora.persistence.store import RunStore, get_run_store
 from evolora.training.backends import MockTrainingBackend, TrainingBackend
+from evolora.training.remote_config import build_training_config_payload, push_config
 from evolora.training.runner import MockModelRunner, ModelRunner
 
 
@@ -176,6 +177,24 @@ class Orchestrator:
             train_error: str | None = None
 
             try:
+                if rec.config.training_backend in {"remote", "unsloth"}:
+                    remote_payload = build_training_config_payload(
+                        run_id=rid,
+                        iteration=iteration,
+                        run_config=rec.config,
+                        plan=validated_plan,
+                        eval_set=self._eval_set,
+                    )
+                    remote_push = push_config(remote_payload)
+                    yield await emit(
+                        EventKind.LOG,
+                        remote_push.message,
+                        dry_run=remote_push.dry_run,
+                        pushed=remote_push.pushed,
+                        remote_path=remote_push.remote_path,
+                        byte_count=remote_push.byte_count,
+                    )
+
                 stream = await self._backend.train(rid, iteration, validated_plan, rec.config.base_model_id)
                 async for progress in stream:
                     if self._cancelled:
