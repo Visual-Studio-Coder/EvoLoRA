@@ -171,6 +171,16 @@ class RemoteTrainingBackend:
         async for line in self._exec_remote_command(eval_command):
             yield {"phase": "evaluate", "message": line, "done": False}
 
+        # The VM's evaluate.py fills "actual" in place in data/evals.json; pull it back so
+        # the orchestrator can score it with the LLM-judge.
+        evals_remote = f"{self._remote_workspace}/data/evals.json"
+        eval_records = await asyncio.to_thread(self._pull_json, evals_remote)
+        yield {
+            "phase": "evaluate",
+            "message": f"Pulled {len(eval_records)} eval records",
+            "done": False,
+        }
+
         adapter_path = f"{self._remote_workspace}/lora_model"
         checksum = hashlib.sha256(
             json.dumps(
@@ -188,6 +198,7 @@ class RemoteTrainingBackend:
                 checksum=checksum,
                 is_mock=False,
             ),
+            "eval_records": eval_records,
             "cost_usd": 0.0,
             "duration_s": 0.0,
         }
@@ -246,6 +257,20 @@ class RemoteTrainingBackend:
             remote_path = f"{self._remote_workspace}/evaluate.py"
             with sftp.file(remote_path, "w") as remote_file:
                 remote_file.write(content)
+        finally:
+            if sftp is not None:
+                sftp.close()
+            client.close()
+
+    def _pull_json(self, remote_path: str):
+        client = self._connect_client()
+        sftp = None
+        try:
+            sftp = client.open_sftp()
+            with sftp.file(remote_path, "r") as remote_file:
+                raw = remote_file.read()
+            text = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+            return json.loads(text)
         finally:
             if sftp is not None:
                 sftp.close()
@@ -319,4 +344,6 @@ def get_backend(name: str, **kwargs) -> TrainingBackend:
 
 
 def _default_evaluate_script_path() -> Path:
-    return Path(__file__).resolve().parents[3] / "scripts" / "vm" / "evaluate.py"
+    # Use the VM guy's committed evaluate.py (reads data/evals.json as [{input, expected}]
+    # and fills "actual" in place) so the VM-side eval matches the agreed format.
+    return Path(__file__).resolve().parents[3] / "src" / "virtual_machine_code" / "evaluate.py"

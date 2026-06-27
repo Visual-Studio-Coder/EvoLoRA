@@ -51,6 +51,7 @@ class Orchestrator:
         adaptive_eval_set: LockedEvalSet | None = None,
         judge: CandidateJudge | None = None,
         retrain_advisor: RetrainAdvisor | None = None,
+        llm_judge=None,
     ) -> None:
         self._config = config
         self._eval_set = eval_set
@@ -60,6 +61,7 @@ class Orchestrator:
         self._runner = model_runner or MockModelRunner()
         self._judge = judge
         self._retrain_advisor = retrain_advisor
+        self._llm_judge = llm_judge
         self._store = run_store or get_run_store()
         self._artifacts = artifact_store or LocalArtifactStore("./artifacts")
         self._evaluator = ObjectiveEvaluator()
@@ -176,6 +178,7 @@ class Orchestrator:
             train_duration = 0.0
             train_error: str | None = None
             remote_payload = None
+            remote_eval_records = None
 
             try:
                 if rec.config.training_backend in {"remote", "unsloth"}:
@@ -201,6 +204,7 @@ class Orchestrator:
                         artifact = progress.get("artifact")
                         train_cost = progress.get("cost_usd", 0.0)
                         train_duration = progress.get("duration_s", 0.0)
+                        remote_eval_records = progress.get("eval_records")
                     else:
                         yield await emit(EventKind.TRAINING_PROGRESS, "", **{k: v for k, v in progress.items() if k != "done"})
             except Exception as exc:
@@ -241,7 +245,16 @@ class Orchestrator:
                 yield await self._finish(rec, RunStatus.FAILED, StopReason.EVAL_HASH_CHANGED, emit)
                 return
 
-            score, eval_results, eval_responses = await self._eval(adapter_path=artifact.adapter_path)
+            if remote_eval_records:
+                # Remote VM already ran the adapter on the evals (filled "actual"); score
+                # those records with the LLM-as-a-judge instead of re-running locally.
+                score, eval_results, eval_responses = await self._judge_remote_evals(
+                    remote_eval_records
+                )
+            else:
+                score, eval_results, eval_responses = await self._eval(
+                    adapter_path=artifact.adapter_path
+                )
             artifact = artifact.model_copy(update={"score": score})
             yield await emit(EventKind.EVAL_COMPLETE, f"Eval score: {score:.3f}", score=score)
 
@@ -395,6 +408,46 @@ class Orchestrator:
         responses = await self._runner.run_batch(prompts, adapter_path=adapter_path)
         score, results = self._evaluator(es.samples, responses)
         return score, results, responses
+
+    def _get_llm_judge(self):
+        if self._llm_judge is None:
+            from evolora.config import get_config
+            from evolora.evaluation.llm_judge import get_llm_judge_evaluator
+
+            cfg = get_config()
+            self._llm_judge = get_llm_judge_evaluator(
+                api_key=cfg.digital_ocean_model_access_key,
+                base_url=cfg.digitalocean_inference_base_url,
+                model=cfg.digital_ocean_judge_model,
+            )
+        return self._llm_judge
+
+    async def _judge_remote_evals(
+        self, records: list[dict]
+    ) -> tuple[float, list[EvalResult], dict[str, str]]:
+        """Score VM-produced eval records [{input, expected, actual}] with the LLM-judge."""
+        aggregate, judged = await self._get_llm_judge().judge(records)
+        results: list[EvalResult] = []
+        responses: dict[str, str] = {}
+        for index, record in enumerate(judged):
+            sample_id = f"vm-{index + 1:03d}"
+            raw_score = record.get("score")
+            score10 = float(raw_score) if isinstance(raw_score, (int, float)) else 0.0
+            results.append(
+                EvalResult(
+                    sample_id=sample_id,
+                    score=max(0.0, min(1.0, score10 / 10.0)),
+                    passed=score10 >= 7,
+                    details={
+                        "input": str(record.get("input", ""))[:200],
+                        "expected": str(record.get("expected", ""))[:200],
+                        "actual": str(record.get("actual", ""))[:200],
+                        "reason": str(record.get("reason", "")),
+                    },
+                )
+            )
+            responses[sample_id] = str(record.get("actual", ""))
+        return aggregate, results, responses
 
     async def _plan(
         self,
