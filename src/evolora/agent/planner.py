@@ -15,7 +15,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from evolora.agent.tools import TOOLS, coerce_hyperparams
+from evolora.agent.tools import TOOLS, coerce_hyperparams, extract_training_payload
 from evolora.models.core import AgentPlan, EvalResult, LoraHyperparams, TrainingDataSpec
 
 _TOOL_SYSTEM_PROMPT = """You are a LoRA fine-tuning strategist driving a bounded, auditable
@@ -23,7 +23,8 @@ self-improvement loop for a small model on a structured-JSON task. Improve the m
 calling these tools, in order:
   1. create_evals — state the criteria a correct answer must satisfy (call once, first).
   2. add_training_examples — synthesize targeted prompt/completion pairs for the observed
-     failures (call one or more times). Never copy the evaluation ground-truth answers.
+     failures as a single training_json object (call one or more times). Never copy the
+     evaluation ground-truth answers.
   3. start_training_model — pick LoRA hyperparameters from the allowed values and launch
      (call exactly once, last).
 Keep training data focused and de-duplicated. After start_training_model is called, stop."""
@@ -123,7 +124,8 @@ class MiniMaxPlanner:
             "user_goal": goal or None,
             "requested_training_sample_count": training_sample_count,
             "instruction": (
-                "Use create_evals, then add_training_examples, then start_training_model. "
+                "Use create_evals, then add_training_examples with a training_json object, "
+                "then start_training_model. "
                 "If user_goal is provided, tailor the eval criteria and training examples toward "
                 "it (while keeping outputs as strict JSON). "
                 "If requested_training_sample_count is not null, add exactly that many training "
@@ -204,14 +206,10 @@ class MiniMaxPlanner:
                         criteria = [str(c) for c in args.get("criteria", [])][:10]
                         result = f"Recorded {len(criteria)} eval criteria."
                     elif name == "add_training_examples":
-                        accepted = [
-                            {"prompt": str(e["prompt"]), "completion": str(e["completion"])}
-                            for e in args.get("examples", [])
-                            if isinstance(e, dict) and e.get("prompt") and e.get("completion")
-                        ]
+                        accepted, rationale = extract_training_payload(args)
                         examples.extend(accepted)
-                        if args.get("rationale"):
-                            rationale_bits.append(str(args["rationale"]))
+                        if rationale:
+                            rationale_bits.append(rationale)
                         result = f"Accepted {len(accepted)} examples ({len(examples)} total)."
                     elif name == "start_training_model":
                         hyperparams = coerce_hyperparams(args)

@@ -68,14 +68,45 @@ TOOLS: list[dict] = [
         "function": {
             "name": "add_training_examples",
             "description": (
-                "Contribute targeted prompt/completion training pairs aimed at the observed "
-                "failures. Call one or more times. Never copy the evaluation ground-truth answers."
+                "Contribute targeted prompt/completion training pairs as one JSON payload aimed "
+                "at the observed failures. Call one or more times. Never copy the evaluation "
+                "ground-truth answers."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "training_json": {
+                        "type": "object",
+                        "description": (
+                            "JSON parameters for this training-data batch. Must include "
+                            "examples and may include rationale or metadata."
+                        ),
+                        "properties": {
+                            "examples": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "prompt": {"type": "string"},
+                                        "completion": {"type": "string"},
+                                    },
+                                    "required": ["prompt", "completion"],
+                                },
+                            },
+                            "rationale": {
+                                "type": "string",
+                                "description": "Why these examples address the current failures.",
+                            },
+                            "metadata": {
+                                "type": "object",
+                                "description": "Optional JSON metadata for traceability.",
+                            },
+                        },
+                        "required": ["examples"],
+                    },
                     "examples": {
                         "type": "array",
+                        "description": "Backward-compatible flat examples array.",
                         "items": {
                             "type": "object",
                             "properties": {
@@ -87,10 +118,10 @@ TOOLS: list[dict] = [
                     },
                     "rationale": {
                         "type": "string",
-                        "description": "Why these examples address the current failures.",
+                        "description": "Backward-compatible flat rationale string.",
                     },
                 },
-                "required": ["examples"],
+                "required": ["training_json"],
             },
         },
     },
@@ -136,6 +167,27 @@ TOOLS: list[dict] = [
 def _nearest(value: float, allowed: list) -> object:
     """Snap an arbitrary value onto the closest allowed choice."""
     return min(allowed, key=lambda a: abs(a - value))
+
+
+def extract_training_payload(args: dict) -> tuple[list[dict[str, str]], str]:
+    """Extract training examples from the add_training_examples JSON parameters.
+
+    The preferred tool shape is {"training_json": {"examples": [...], "rationale": "..."}},
+    but we keep the older flat {"examples": [...], "rationale": "..."} shape working so
+    in-flight model responses and tests remain compatible.
+    """
+    payload = args.get("training_json")
+    if not isinstance(payload, dict):
+        payload = args
+
+    raw_examples = payload.get("examples", [])
+    accepted = [
+        {"prompt": str(example["prompt"]), "completion": str(example["completion"])}
+        for example in raw_examples
+        if isinstance(example, dict) and example.get("prompt") and example.get("completion")
+    ]
+    rationale = payload.get("rationale") or args.get("rationale") or ""
+    return accepted, str(rationale)
 
 
 def coerce_hyperparams(args: dict) -> dict:

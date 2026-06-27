@@ -8,6 +8,7 @@ from evolora.agent.tools import (
     NUM_TRAIN_EPOCHS,
     TOOLS,
     coerce_hyperparams,
+    extract_training_payload,
 )
 from evolora.models.core import LoraHyperparams
 
@@ -15,6 +16,20 @@ from evolora.models.core import LoraHyperparams
 def test_three_tools_exposed():
     names = {t["function"]["name"] for t in TOOLS}
     assert names == {"create_evals", "add_training_examples", "start_training_model"}
+    assert all(t["type"] == "function" for t in TOOLS)
+
+
+def test_add_training_examples_accepts_json_parameters():
+    schema = next(
+        t["function"]["parameters"]
+        for t in TOOLS
+        if t["function"]["name"] == "add_training_examples"
+    )
+    assert schema["required"] == ["training_json"]
+    training_json = schema["properties"]["training_json"]
+    assert training_json["type"] == "object"
+    assert training_json["required"] == ["examples"]
+    assert training_json["properties"]["examples"]["type"] == "array"
 
 
 def test_start_training_schema_uses_choice_enums():
@@ -28,6 +43,34 @@ def test_start_training_schema_uses_choice_enums():
     assert props["num_train_epochs"]["enum"] == NUM_TRAIN_EPOCHS
     assert props["per_device_train_batch_size"]["enum"] == BATCH_SIZES
     assert props["lora_alpha_multiplier"]["enum"] == ALPHA_MULTIPLIERS
+
+
+def test_extract_training_payload_prefers_training_json():
+    examples, rationale = extract_training_payload(
+        {
+            "training_json": {
+                "examples": [{"prompt": "ticket: outage", "completion": '{"urgency":"high"}'}],
+                "rationale": "covers outage urgency",
+                "metadata": {"source": "test"},
+            },
+            "examples": [{"prompt": "old", "completion": "old"}],
+        }
+    )
+
+    assert examples == [{"prompt": "ticket: outage", "completion": '{"urgency":"high"}'}]
+    assert rationale == "covers outage urgency"
+
+
+def test_extract_training_payload_keeps_flat_shape_compatible():
+    examples, rationale = extract_training_payload(
+        {
+            "examples": [{"prompt": "customer data", "completion": '{"ok":true}'}],
+            "rationale": "legacy shape",
+        }
+    )
+
+    assert examples == [{"prompt": "customer data", "completion": '{"ok":true}'}]
+    assert rationale == "legacy shape"
 
 
 def test_coerce_valid_choices_pass_through():
