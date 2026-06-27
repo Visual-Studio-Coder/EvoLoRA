@@ -1,0 +1,43 @@
+# Environment / secrets
+.env
+.env.local
+*.env
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+build/
+dist/
+
+# uv / venv
+.venv/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Runtime artifacts (adapters, checkpoints)
+artifacts/
+
+# Local logs and OS files
+*.log
+.DS_Store
+
+# Local agent notes
+codex.md
+
+# Ignore heavy remote VM training artifacts
+src/virtual_machine_code/lora_model/
+src/virtual_machine_code/outputs/
+src/virtual_machine_code/generations/
+src/virtual_machine_code/unsloth_compiled_cache/
+*.safetensors
+*.bin
+*.model
+*.jinja
