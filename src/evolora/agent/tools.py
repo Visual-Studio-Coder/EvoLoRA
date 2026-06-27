@@ -30,10 +30,10 @@ TOOLS: list[dict] = [
         "function": {
             "name": "create_evals",
             "description": (
-                "Declare what a correct answer looks like for this run. Use it once, first, to "
-                "set the evaluation focus before generating training data. This records the "
-                "criteria the agent is optimizing toward; it does not alter the locked objective "
-                "scorer."
+                "Create the evaluation set for this run. Call once, first: declare the criteria a "
+                "correct answer must satisfy AND generate concrete eval examples (each a prompt "
+                "plus the exact correct JSON output). These examples become the objective eval "
+                "set the run is scored against."
             ),
             "parameters": {
                 "type": "object",
@@ -42,7 +42,22 @@ TOOLS: list[dict] = [
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "Short bullet criteria a good model output must satisfy.",
-                    }
+                    },
+                    "eval_examples": {
+                        "type": "array",
+                        "description": "Concrete evaluation examples used to objectively score the model.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "prompt": {"type": "string"},
+                                "expected_output": {
+                                    "type": "object",
+                                    "description": "The exact correct JSON object the model should output.",
+                                },
+                            },
+                            "required": ["prompt", "expected_output"],
+                        },
+                    },
                 },
                 "required": ["criteria"],
             },
