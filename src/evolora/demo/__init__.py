@@ -1,0 +1,3 @@
+from .task import ADAPTIVE_EVAL_SET, LOCKED_EVAL_SET
+
+__all__ = ["ADAPTIVE_EVAL_SET", "LOCKED_EVAL_SET"]

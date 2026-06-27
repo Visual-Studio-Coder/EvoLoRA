@@ -1,0 +1,24 @@
+# Environment / secrets
+.env
+.env.local
+*.env
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+build/
+dist/
+
+# uv / venv
+.venv/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Runtime artifacts (adapters, checkpoints)
+artifacts/
