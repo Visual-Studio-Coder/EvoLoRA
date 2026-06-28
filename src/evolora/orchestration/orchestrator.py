@@ -231,6 +231,7 @@ class Orchestrator:
                 f"Plan validated: {len(validated_plan.data_spec.examples)} examples ({count_note})",
                 example_count=len(validated_plan.data_spec.examples),
                 requested_training_sample_count=exact_count,
+                hyperparams=validated_plan.hyperparams.model_dump(),
             )
 
             # --- TRAIN ---
