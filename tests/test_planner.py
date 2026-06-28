@@ -170,7 +170,20 @@ async def test_minimax_plan_retries_after_truncated_training_examples_tool_call(
     assert len(planner.client.completions.calls) == 5
     assert all(call["max_tokens"] == MINIMAX_TOOL_MAX_TOKENS for call in planner.client.completions.calls)
     first_retry_prompt = planner.client.completions.calls[2]["messages"][1]["content"]
-    assert "at most 5 examples per call" in first_retry_prompt
+    assert "at most 12 examples per call" in first_retry_prompt  # retry shrinks batch 25 -> 12
+
+
+def test_rounds_for_scales_with_count():
+    from evolora.agent.planner import (
+        MINIMAX_MAX_TOOL_ROUNDS,
+        MINIMAX_MAX_TOOL_ROUNDS_CAP,
+        _rounds_for,
+    )
+
+    assert _rounds_for(None, 25) == MINIMAX_MAX_TOOL_ROUNDS  # auto count -> base
+    assert _rounds_for(20, 25) == MINIMAX_MAX_TOOL_ROUNDS  # small fits in base rounds
+    assert _rounds_for(200, 25) == 12  # ceil(200/25) + 4
+    assert _rounds_for(100000, 25) == MINIMAX_MAX_TOOL_ROUNDS_CAP  # huge -> capped
 
 
 @pytest.mark.asyncio

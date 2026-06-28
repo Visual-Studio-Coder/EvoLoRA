@@ -10,6 +10,7 @@ handles it; if anything fails, ``HeuristicPlanner`` produces a valid plan with n
 from __future__ import annotations
 
 import json
+import math
 import random
 import re
 from typing import Any
@@ -51,10 +52,22 @@ Example prompt:
 Do this for ALL examples, no exceptions. For extraction/parsing goals, include the source text or
 record in the prompt. Never rely on context the prompt doesn't state."""
 
-MINIMAX_TOOL_MAX_TOKENS = 8000
+MINIMAX_TOOL_MAX_TOKENS = 16000
 MINIMAX_EVAL_MAX_TOKENS = 8000
 MINIMAX_MAX_TOOL_ROUNDS = 8
-MINIMAX_EXAMPLE_BATCH_SIZE = 10
+# Tool rounds scale with the requested example count (≈ one add_training_examples call per
+# batch + a few rounds for create_evals/start_training_model/buffer), capped so huge counts
+# don't run away. _validate_plan pads to the exact count if the agent falls a little short.
+MINIMAX_MAX_TOOL_ROUNDS_CAP = 80
+MINIMAX_EXAMPLE_BATCH_SIZE = 25
+
+
+def _rounds_for(count: int | None, batch_size: int) -> int:
+    """How many bounded tool-calling rounds to allow for `count` training examples."""
+    if not count:
+        return MINIMAX_MAX_TOOL_ROUNDS
+    needed = math.ceil(count / max(1, batch_size)) + 4  # +create_evals +start +buffer
+    return max(MINIMAX_MAX_TOOL_ROUNDS, min(MINIMAX_MAX_TOOL_ROUNDS_CAP, needed))
 
 
 class MiniMaxPlanError(RuntimeError):
@@ -122,9 +135,13 @@ class MiniMaxPlanner:
     def _make_client(self):
         from openai import AsyncOpenAI
 
+        # Per-request timeout + SDK retries so one transient blip during a long multi-round
+        # plan (large example counts) doesn't waste the whole session and force a fallback.
         return AsyncOpenAI(
             api_key=self._api_key,
             base_url=self._base_url,
+            timeout=120.0,
+            max_retries=5,
         )
 
     def _build_user_prompt(
@@ -176,7 +193,7 @@ class MiniMaxPlanner:
     ) -> tuple[AgentPlan, bool]:
         """Return (plan, fallback_used). Drives the three tools; falls back on any failure."""
         errors: list[str] = []
-        for batch_size in (MINIMAX_EXAMPLE_BATCH_SIZE, 5):
+        for batch_size in (MINIMAX_EXAMPLE_BATCH_SIZE, 12):
             try:
                 plan = await self._plan_with_tools(
                     iteration,
@@ -240,7 +257,8 @@ class MiniMaxPlanner:
         rationale_bits: list[str] = []
         hyperparams: dict | None = None
 
-        for _round in range(MINIMAX_MAX_TOOL_ROUNDS):  # bounded tool-calling turns
+        max_rounds = _rounds_for(training_sample_count, example_batch_size)
+        for _round in range(max_rounds):  # bounded tool-calling turns (scaled to count)
             resp = await client.chat.completions.create(
                 model=self._model,
                 messages=messages,
