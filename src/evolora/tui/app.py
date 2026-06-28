@@ -294,6 +294,21 @@ class EvoLoRAApp(App[None]):
         border: solid #006622;
     }
 
+    #chat-toggle {
+        min-width: 12;
+        margin: 0 0 0 1;
+        background: #001a14;
+        color: #2ad6c0;
+        border: solid #0a5a4a;
+    }
+
+    #chat-toggle.active {
+        background: #063b30;
+        color: #5ff5e0;
+        border: solid #2ad6c0;
+        text-style: bold;
+    }
+
     #cancel-button {
         min-width: 12;
         margin: 0 0 0 1;
@@ -323,6 +338,8 @@ class EvoLoRAApp(App[None]):
         super().__init__()
         self._orchestrator: Orchestrator | None = None
         self._run_active = False
+        self._chat_mode = False
+        self._chat_busy = False
         self._loss_values: list[float] = []
         self._baseline = 0.0
         self._best = 0.0
@@ -394,6 +411,7 @@ class EvoLoRAApp(App[None]):
                 )
                 yield Button("START", id="start-button")
                 yield Button("CANCEL", id="cancel-button", disabled=True)
+                yield Button("CHAT", id="chat-toggle")
                 yield Button("YES", id="approve-retrain-button", disabled=True)
                 yield Button("NO", id="decline-retrain-button", disabled=True)
 
@@ -410,18 +428,89 @@ class EvoLoRAApp(App[None]):
             self.action_start_run()
         elif event.button.id == "cancel-button":
             self.action_cancel_run()
+        elif event.button.id == "chat-toggle":
+            self.action_toggle_chat()
         elif event.button.id == "approve-retrain-button":
             self.action_answer_retrain(True)
         elif event.button.id == "decline-retrain-button":
             self.action_answer_retrain(False)
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
+        if self._chat_mode and event.input.id == "goal-input":
+            self._send_chat(event.value.strip())
+            return
         if event.input.id in {"goal-input", "sample-count-input"}:
             self.action_start_run()
+
+    def action_toggle_chat(self) -> None:
+        """Switch between training mode and chatting with the trained model.
+
+        Disabled while a run is in progress — you can't chat mid-training.
+        """
+        if self._run_active:
+            self._agent_log().write("[yellow][!] Can't chat while a training run is active[/]")
+            return
+        self._chat_mode = not self._chat_mode
+        goal_input = self.query_one("#goal-input", Input)
+        chat_button = self.query_one("#chat-toggle", Button)
+        if self._chat_mode:
+            chat_button.label = "EXIT CHAT"
+            chat_button.add_class("active")
+            self.query_one("#start-button", Button).disabled = True
+            goal_input.placeholder = "Ask your trained model… (Enter to send)"
+            goal_input.value = ""
+            self._agent_log().write(
+                "[bright_green][chat][/] Chat mode ON — messages go to your trained model on the VM. "
+                "First reply loads the model (~30s)."
+            )
+            self._set_state("CHAT", "chatting with the trained adapter (lora_model)")
+        else:
+            chat_button.label = "CHAT"
+            chat_button.remove_class("active")
+            self.query_one("#start-button", Button).disabled = self._run_active
+            goal_input.placeholder = "What kind of specialized model would you like to build today?"
+            self._agent_log().write("[bright_green][chat][/] Chat mode OFF")
+            self._set_state("READY", "training mode")
+        goal_input.focus()
+
+    def _send_chat(self, prompt: str) -> None:
+        if not prompt or self._chat_busy:
+            return
+        self.query_one("#goal-input", Input).value = ""
+        self._agent_log().write(f"[bold bright_green]you ›[/] {prompt}")
+        self._agent_log().write("[#2a7a2a]model is thinking…[/]")
+        self.run_worker(self._chat_worker(prompt), group="evolora-chat", exclusive=True)
+
+    async def _chat_worker(self, prompt: str) -> None:
+        self._chat_busy = True
+        self.query_one("#goal-input", Input).disabled = True
+        try:
+            cfg = get_config()
+            if cfg.training_backend != "remote":
+                self._agent_log().write(
+                    "[red][x][/] Chat needs TRAINING_BACKEND=remote (a VM with a trained adapter)."
+                )
+                return
+            backend = get_backend("remote")
+            reply = await backend.chat(prompt)
+            self._agent_log().write(f"[bold cyan]model ›[/] {reply or '(empty response)'}")
+        except Exception as exc:
+            self._agent_log().write(f"[red][x] chat failed:[/] {exc}")
+            self._agent_log().write(
+                "[#805000]Tip: chat works after a real remote run produces lora_model on the VM.[/]"
+            )
+        finally:
+            self._chat_busy = False
+            if self._chat_mode:
+                self.query_one("#goal-input", Input).disabled = False
+                self.query_one("#goal-input", Input).focus()
 
     def action_start_run(self) -> None:
         if self._run_active:
             self._agent_log().write("[yellow][!] Run already in progress[/]")
+            return
+        if self._chat_mode:
+            self._agent_log().write("[yellow][!] Exit chat mode before starting a run[/]")
             return
 
         sample_count = self._parse_sample_count()
@@ -440,6 +529,7 @@ class EvoLoRAApp(App[None]):
         self._approval_context = None
         self.query_one("#start-button", Button).disabled = True
         self.query_one("#cancel-button", Button).disabled = False
+        self.query_one("#chat-toggle", Button).disabled = True  # no chatting mid-training
         # Lock the goal + sample inputs for the duration of the run.
         self.query_one("#goal-input", Input).disabled = True
         self.query_one("#sample-count-input", Input).disabled = True
@@ -534,6 +624,7 @@ class EvoLoRAApp(App[None]):
             self._run_active = False
             self.query_one("#start-button", Button).disabled = False
             self.query_one("#cancel-button", Button).disabled = True
+            self.query_one("#chat-toggle", Button).disabled = False
             self.query_one("#goal-input", Input).disabled = False
             self.query_one("#sample-count-input", Input).disabled = False
             self._set_retrain_buttons(False)
