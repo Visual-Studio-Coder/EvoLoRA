@@ -144,7 +144,9 @@ class Orchestrator:
                     "[warn] MiniMax could not generate evals after 3 tries — using fallback eval set",
                 )
 
-        if generated_eval_records:
+        # In autonomous mode (require_retrain_approval off) the generated eval set is
+        # auto-approved — no gate.
+        if generated_eval_records and rec.config.require_retrain_approval:
             self._approval_future = asyncio.get_running_loop().create_future()
             yield await emit(
                 EventKind.EVAL_APPROVAL_REQUIRED,

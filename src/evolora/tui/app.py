@@ -671,7 +671,8 @@ class EvoLoRAApp(App[None]):
             base_model_id=self._selected_base_model(),
             training_sample_count=self._requested_sample_count,
             goal=self._goal,
-            require_retrain_approval=True,
+            # AUTO_APPROVE=true -> no approval gates (eval set + keep-training); fully autonomous.
+            require_retrain_approval=not cfg.auto_approve,
         )
 
         backend = get_backend(cfg.training_backend)
