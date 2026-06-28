@@ -28,13 +28,28 @@ calling these tools, in order:
      evaluation ground-truth answers.
   3. start_training_model — pick LoRA hyperparameters from the allowed values and launch
      (call exactly once, last).
+Every training prompt's input must be SELF-CONTAINED: the model sees only the prompt. For SQL
+goals, EVERY prompt MUST begin with a schema block of `CREATE TABLE` statements (columns + types)
+for every table the completion references, then a blank line, then the request — do this for all
+examples. For extraction/parsing goals, include the source record in the prompt.
 Keep training data focused and de-duplicated. After start_training_model is called, stop."""
 
 _EVAL_GEN_SYSTEM = """You create the evaluation set for fine-tuning a model on the user's task.
 Call the create_evals tool with `criteria` (what a correct answer must satisfy) and
 `eval_examples` — concrete {prompt, expected_output} pairs where expected_output is the exact
 correct JSON object the model should produce. Make examples varied, realistic, and objectively
-checkable."""
+checkable.
+
+CRITICAL: every prompt's input must be SELF-CONTAINED — the model sees only the prompt. For SQL
+goals, EVERY prompt MUST begin with a schema block of one or more `CREATE TABLE` statements
+(column names + types) for every table the query references, then a blank line, then the request.
+Example prompt:
+  CREATE TABLE customers (customer_id INT, name TEXT, age INT, city TEXT);
+  CREATE TABLE orders (order_id INT, customer_id INT, amount DECIMAL);
+
+  Write a query returning each customer's name and total order amount.
+Do this for ALL examples, no exceptions. For extraction/parsing goals, include the source text or
+record in the prompt. Never rely on context the prompt doesn't state."""
 
 MINIMAX_TOOL_MAX_TOKENS = 8000
 MINIMAX_EVAL_MAX_TOKENS = 8000
