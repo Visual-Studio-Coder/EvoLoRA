@@ -181,7 +181,7 @@ class EvoLoRAApp(App[None]):
     }
 
     #config-panel {
-        height: 14;
+        height: 18;
     }
 
     #hyperparam-panel {
@@ -316,8 +316,8 @@ class EvoLoRAApp(App[None]):
     }
 
     #base-model-select {
-        width: 22;
-        margin: 0 0 0 1;
+        width: 1fr;
+        margin: 0 0 1 0;
     }
 
     #cancel-button {
@@ -392,6 +392,15 @@ class EvoLoRAApp(App[None]):
                 with Vertical(id="right-column"):
                     with Vertical(id="config-panel", classes="panel"):
                         yield SectionTitle("-- LORA CONFIG")
+                        yield Select(
+                            [
+                                ("Llama 3.1 8B", "unsloth/Meta-Llama-3.1-8B-Instruct"),
+                                ("Phi-3-mini (fast)", "unsloth/Phi-3-mini-4k-instruct"),
+                            ],
+                            id="base-model-select",
+                            allow_blank=False,
+                            value=self._default_base_model(),
+                        )
                         yield Static("", id="config-values")
                     with Vertical(id="hyperparam-panel", classes="panel"):
                         yield SectionTitle("-- HYPERPARAMETERS")
@@ -411,15 +420,6 @@ class EvoLoRAApp(App[None]):
                 yield Input(
                     placeholder="What kind of specialized model would you like to build today?",
                     id="goal-input",
-                )
-                yield Select(
-                    [
-                        ("Llama 3.1 8B", "unsloth/Meta-Llama-3.1-8B-Instruct"),
-                        ("Phi-3-mini (fast)", "unsloth/Phi-3-mini-4k-instruct"),
-                    ],
-                    id="base-model-select",
-                    allow_blank=False,
-                    value=self._default_base_model(),
                 )
                 yield Static("# samples", id="sample-label")
                 yield Input(
@@ -484,7 +484,6 @@ class EvoLoRAApp(App[None]):
             chat_button.add_class("active")
             self.query_one("#start-button", Button).disabled = True
             self.query_one("#model-select").display = True
-            self.query_one("#base-model-select").display = False
             self.query_one("#sample-label").display = False
             self.query_one("#sample-count-input").display = False
             goal_input.placeholder = "Ask the selected model… (Enter to send)"
@@ -500,7 +499,6 @@ class EvoLoRAApp(App[None]):
             chat_button.remove_class("active")
             self.query_one("#start-button", Button).disabled = self._run_active
             self.query_one("#model-select").display = False
-            self.query_one("#base-model-select").display = True
             self.query_one("#sample-label").display = True
             self.query_one("#sample-count-input").display = True
             goal_input.placeholder = "What kind of specialized model would you like to build today?"
@@ -621,9 +619,10 @@ class EvoLoRAApp(App[None]):
         self.query_one("#start-button", Button).disabled = True
         self.query_one("#cancel-button", Button).disabled = False
         self.query_one("#chat-toggle", Button).disabled = True  # no chatting mid-training
-        # Lock the goal + sample inputs for the duration of the run.
+        # Lock the goal + sample inputs + base-model picker for the duration of the run.
         self.query_one("#goal-input", Input).disabled = True
         self.query_one("#sample-count-input", Input).disabled = True
+        self.query_one("#base-model-select", Select).disabled = True
         self._set_retrain_buttons(False)
         self._agent_log().clear()
         self._examples_log().clear()
@@ -723,6 +722,7 @@ class EvoLoRAApp(App[None]):
             self.query_one("#chat-toggle", Button).disabled = False
             self.query_one("#goal-input", Input).disabled = False
             self.query_one("#sample-count-input", Input).disabled = False
+            self.query_one("#base-model-select", Select).disabled = False
             self._set_retrain_buttons(False)
             self._update_examples_from_record()
 
@@ -971,7 +971,7 @@ class EvoLoRAApp(App[None]):
     ) -> None:
         cfg = get_config()
         lines = [
-            ("base_model", self._selected_base_model().split("/")[-1]),
+            # base_model shown by the dropdown above
             ("backend", cfg.training_backend),
             # In remote mode the mock runner is bypassed — baseline + eval run the real model
             # on the VM and are LLM-judged. Show that instead of the unused "mock" label.
