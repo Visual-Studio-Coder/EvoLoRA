@@ -331,27 +331,37 @@ class MiniMaxPlanner:
         )
         return plan, False
 
-    async def generate_evals(self, goal: str, count: int = 5) -> list[dict]:
+    async def generate_evals(
+        self, goal: str, count: int = 5, difficulty: str = "standard"
+    ) -> list[dict]:
         """Have MiniMax CALL the create_evals tool to produce an objective eval set.
 
-        Returns a list of {"prompt": str, "expected": dict}. Returns [] on any
-        failure so the orchestrator can fall back to its default eval set.
+        ``difficulty`` of "hard" asks for expert-level, tricky examples — used when the
+        base model already aces the standard set. Returns a list of {"prompt", "expected"};
+        [] on any failure so the orchestrator can fall back.
         """
         client = self._make_client()
         create_evals_tools = [t for t in TOOLS if t["function"]["name"] == "create_evals"]
         # A fresh seed per call nudges MiniMax to produce a NEW, diverse eval set each run
         # instead of converging on the same canonical examples (low temp made it look static).
         variation_seed = random.randint(1, 9_999_999)
+        difficulty_note = (
+            " Make these HARD: expert-level, tricky edge cases and multi-step reasoning that a "
+            "strong model would still get wrong — the base model already aced the easy set."
+            if difficulty == "hard"
+            else ""
+        )
         user_prompt = json.dumps({
             "goal": goal,
             "count": count,
             "variation_seed": variation_seed,
+            "difficulty": difficulty,
             "instruction": (
                 f"Call create_evals with criteria and exactly {count} eval_examples for this "
                 "goal. Generate a FRESH, DIVERSE set each time: vary the scenarios, difficulty, "
                 "and edge cases, and do NOT reuse a fixed canonical set — use variation_seed "
-                f"{variation_seed} to diversify. Each expected_output must be the single correct "
-                "JSON output for its prompt."
+                f"{variation_seed} to diversify.{difficulty_note} Each expected_output must be the "
+                "single correct JSON output for its prompt."
             ),
         })
         try:
