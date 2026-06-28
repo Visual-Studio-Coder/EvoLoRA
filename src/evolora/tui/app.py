@@ -102,6 +102,7 @@ class EvoLoRAApp(App[None]):
     BINDINGS = [
         Binding("ctrl+r", "start_run", "Start run"),
         Binding("ctrl+x", "cancel_run", "Cancel run"),
+        Binding("ctrl+y", "copy_log", "Copy agent log"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -893,6 +894,19 @@ class EvoLoRAApp(App[None]):
             f"baseline {self._baseline:.3f} | current {self._current:.3f} | best {self._best:.3f}"
         )
         self._update_metrics_panel()
+
+    def action_copy_log(self) -> None:
+        """Copy the full agent reasoning log to the system clipboard (Ctrl+Y).
+
+        Lets you grab the exact text (errors, decisions) to paste elsewhere, since
+        the TUI's mouse capture can make manual selection awkward in some terminals.
+        """
+        log = self._agent_log()
+        text = "\n".join(strip.text for strip in log.lines)
+        self.copy_to_clipboard(text)
+        self.query_one("#status-text", Static).update(
+            f"[#39ff14]copied agent log to clipboard ({len(log.lines)} lines)[/]"
+        )
 
     def _agent_log(self) -> RichLog:
         return self.query_one("#agent-log", RichLog)

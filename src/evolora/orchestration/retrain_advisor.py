@@ -147,7 +147,10 @@ class MiniMaxRetrainAdvisor:
                 model=self._model,
                 messages=messages,
                 temperature=0.1,
-                max_tokens=500,
+                # M2.7 is a reasoning model: it spends tokens on a <think> block before the
+                # JSON answer. 500 truncated it (finish_reason=length) -> parse failure ->
+                # silent heuristic fallback. 4000 lets it finish thinking AND emit the JSON.
+                max_tokens=4000,
             )
             parsed = _extract_json(resp.choices[0].message.content or "{}")
             if not isinstance(parsed, dict):
