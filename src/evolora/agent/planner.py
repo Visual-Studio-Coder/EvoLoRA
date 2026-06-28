@@ -20,8 +20,22 @@ from pydantic import ValidationError
 from evolora.agent.tools import TOOLS, coerce_hyperparams, extract_training_payload
 from evolora.models.core import AgentPlan, EvalResult, LoraHyperparams, TrainingDataSpec
 
-_TOOL_SYSTEM_PROMPT = """You are a LoRA fine-tuning strategist driving a bounded, auditable
-self-improvement loop for a small model on a structured-JSON task. Improve the model by
+# The single most important constraint: the fine-tuned model is offline at inference. Every
+# prompt it trains/evals on must be answerable from its own text alone — no URL it could "open",
+# no schema/table it must look up. Reused verbatim by both the training and eval system prompts.
+_NO_WEB_RULE = (
+    "The fine-tuned model has NO internet, web-search, file, or tool access. At inference it sees "
+    "ONLY the literal prompt text you write — nothing else, and it CANNOT open or read any URL. "
+    "Therefore EVERY prompt must be completely SELF-CONTAINED: never refer to a schema, table, "
+    "document, dataset, or record by name or link alone — embed the FULL content inline so the "
+    "prompt is solvable purely from its own text. A `$schema`/`$id` URL may appear only as a "
+    "literal metadata string INSIDE an already-inlined schema; it is never a substitute for "
+    "writing the schema body out in full. Make every example DIFFERENT: vary names, values, "
+    "structures, and scenarios — never repeat the same record or a near-duplicate."
+)
+
+_TOOL_SYSTEM_PROMPT = f"""You are a LoRA fine-tuning strategist driving a bounded, auditable
+self-improvement loop for a small model. Improve the model toward the USER'S stated goal by
 calling these tools, in order:
   1. create_evals — state the criteria a correct answer must satisfy (call once, first).
   2. add_training_examples — synthesize targeted prompt/completion pairs for the observed
@@ -29,28 +43,37 @@ calling these tools, in order:
      evaluation ground-truth answers.
   3. start_training_model — pick LoRA hyperparameters from the allowed values and launch
      (call exactly once, last).
-Every training prompt's input must be SELF-CONTAINED: the model sees only the prompt. For SQL
-goals, EVERY prompt MUST begin with a schema block of `CREATE TABLE` statements (columns + types)
-for every table the completion references, then a blank line, then the request — do this for all
-examples. For extraction/parsing goals, include the source record in the prompt.
-Keep training data focused and de-duplicated. After start_training_model is called, stop."""
+{_NO_WEB_RULE}
+Goal-specific prompt rules:
+  - SQL goals: EVERY prompt MUST begin with a schema block of `CREATE TABLE` statements
+    (columns + types) for every table the completion references, then a blank line, then the
+    request.
+  - JSON-Schema-generation goals: write the COMPLETE JSON Schema inline in the prompt (all
+    properties, types, required fields, formats, and constraints); the completion is a concrete
+    JSON object that validates against that inlined schema.
+  - Extraction/parsing goals: include the full source text or record in the prompt.
+Keep training data focused, varied, and de-duplicated. After start_training_model is called, stop."""
 
-_EVAL_GEN_SYSTEM = """You create the evaluation set for fine-tuning a model on the user's task.
+_EVAL_GEN_SYSTEM = f"""You create the evaluation set for fine-tuning a model on the user's task.
 Call the create_evals tool with `criteria` (what a correct answer must satisfy) and
-`eval_examples` — concrete {prompt, expected_output} pairs where expected_output is the exact
+`eval_examples` — concrete {{prompt, expected_output}} pairs where expected_output is the exact
 correct JSON object the model should produce. Make examples varied, realistic, and objectively
 checkable.
 
-CRITICAL: every prompt's input must be SELF-CONTAINED — the model sees only the prompt. For SQL
-goals, EVERY prompt MUST begin with a schema block of one or more `CREATE TABLE` statements
-(column names + types) for every table the query references, then a blank line, then the request.
-Example prompt:
-  CREATE TABLE customers (customer_id INT, name TEXT, age INT, city TEXT);
-  CREATE TABLE orders (order_id INT, customer_id INT, amount DECIMAL);
+{_NO_WEB_RULE}
+Goal-specific prompt rules:
+  - SQL goals: EVERY prompt MUST begin with a schema block of one or more `CREATE TABLE`
+    statements (column names + types) for every table the query references, then a blank line,
+    then the request. Example prompt:
+      CREATE TABLE customers (customer_id INT, name TEXT, age INT, city TEXT);
+      CREATE TABLE orders (order_id INT, customer_id INT, amount DECIMAL);
 
-  Write a query returning each customer's name and total order amount.
-Do this for ALL examples, no exceptions. For extraction/parsing goals, include the source text or
-record in the prompt. Never rely on context the prompt doesn't state."""
+      Write a query returning each customer's name and total order amount.
+  - JSON-Schema-generation goals: write the COMPLETE JSON Schema inline in the prompt (all
+    properties, types, required fields, formats, and constraints), then ask for a conforming
+    object; expected_output is a concrete object that validates against that inlined schema.
+  - Extraction/parsing goals: include the full source text or record in the prompt.
+Do this for ALL examples, no exceptions. Never rely on context the prompt doesn't state."""
 
 MINIMAX_TOOL_MAX_TOKENS = 16000
 MINIMAX_EVAL_MAX_TOKENS = 8000
@@ -164,14 +187,19 @@ class MiniMaxPlanner:
             "current_score": current_score,
             "failure_count": len(failures),
             "sample_failures": failure_summary,
-            "task": "structured customer spending summary (JSON output)",
+            "task": goal or "the user's structured-output goal (JSON output)",
             "user_goal": goal or None,
             "requested_training_sample_count": training_sample_count,
             "instruction": (
                 "Use create_evals, then add_training_examples with a training_json object, "
                 "then start_training_model. "
-                "If user_goal is provided, tailor the eval criteria and training examples toward "
-                "it (while keeping outputs as strict JSON). "
+                "Tailor the eval criteria and training examples to user_goal (above) — do NOT "
+                "default to any other domain (e.g. customer-spending) unless the goal asks for it. "
+                "Keep outputs as strict JSON. "
+                "Every prompt must be fully SELF-CONTAINED: the trained model is offline and sees "
+                "only the prompt text — it cannot open URLs or look anything up, so embed any "
+                "schema/data inline in full. Make every example DIFFERENT (vary names, values, and "
+                "scenarios); never repeat the same record. "
                 "If requested_training_sample_count is not null, add exactly that many training "
                 "examples. Use multiple add_training_examples calls with at most "
                 f"{example_batch_size} examples per call. If it is null, choose a sensible "

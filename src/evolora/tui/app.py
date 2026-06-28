@@ -531,6 +531,20 @@ class EvoLoRAApp(App[None]):
         self._update_metrics_panel()
         self.query_one("#goal-input", Input).focus()
         self._init_voice()
+        self._maybe_autostart()
+
+    def _maybe_autostart(self) -> None:
+        """For unattended/recorded runs: if EVOLORA_AUTOSTART is set, pre-fill the goal +
+        sample count from env and kick off the run automatically (no keyboard needed)."""
+        if os.getenv("EVOLORA_AUTOSTART", "").strip().lower() not in {"1", "true", "yes", "on"}:
+            return
+        goal = os.getenv("EVOLORA_GOAL", "").strip()
+        samples = os.getenv("EVOLORA_SAMPLES", "").strip()
+        if goal:
+            self.query_one("#goal-input", Input).value = goal
+        if samples:
+            self.query_one("#sample-count-input", Input).value = samples
+        self.set_timer(2.5, self.action_start_run)
 
     # ------------------------------------------------------------------ voice
 

@@ -620,8 +620,18 @@ class Orchestrator:
             return plan
 
         examples = list(plan.data_spec.examples[:requested])
+        # Pad up to the requested count by CYCLING the agent's real, on-goal examples rather than
+        # injecting off-domain customer-spending filler — otherwise a JSON/SQL/etc. run gets
+        # polluted with the wrong task. Fall back to the synthetic example only if the agent
+        # produced nothing at all.
+        on_goal = list(plan.data_spec.examples)
+        i = 0
         while len(examples) < requested:
-            examples.append(self._synthetic_training_example(len(examples) + 1))
+            if on_goal:
+                examples.append(on_goal[i % len(on_goal)])
+                i += 1
+            else:
+                examples.append(self._synthetic_training_example(len(examples) + 1))
 
         data_spec = plan.data_spec.model_copy(update={"examples": examples, "max_examples": requested})
         return plan.model_copy(update={"data_spec": data_spec})
