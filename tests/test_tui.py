@@ -118,6 +118,29 @@ async def test_tui_eval_approval_event_enables_yes_no_buttons() -> None:
         assert app.query_one("#decline-retrain-button", Button).disabled is False
 
 
+@pytest.mark.asyncio
+async def test_tui_validation_event_updates_hyperparameter_pane() -> None:
+    from textual.widgets import Static
+
+    app = EvoLoRAApp()
+    hp = {"r": 16, "lora_alpha": 32, "learning_rate": 1e-4, "num_epochs": 3, "batch_size": 1}
+
+    async with app.run_test(size=(120, 40)):
+        app._apply_event(
+            Event(
+                kind=EventKind.VALIDATION_COMPLETE,
+                run_id="run-1",
+                message="Plan validated: 30 examples",
+                data={"hyperparams": hp},
+            )
+        )
+
+        assert app._hyperparams == hp
+        rendered = str(app.query_one("#hyperparam-values", Static).render())
+        assert "16" in rendered  # rank
+        assert "1.0e-04" in rendered  # learning_rate formatted
+
+
 def test_tui_exception_writer_saves_traceback(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(tui_app, "default_log_dir", lambda: tmp_path)
     app = EvoLoRAApp()
