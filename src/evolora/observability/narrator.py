@@ -49,7 +49,7 @@ class Narrator:
 
     @property
     def is_livekit_ready(self) -> bool:
-        return bool(rtc and api and get_config().livekit_available)
+        return bool(rtc and api and get_config().voice_available)
 
     async def connect(self) -> bool:
         """Connect to the LiveKit Room using configured credentials."""
