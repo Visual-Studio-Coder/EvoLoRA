@@ -180,7 +180,16 @@ class EvoLoRAApp(App[None]):
     }
 
     #config-panel {
-        height: 18;
+        height: 14;
+    }
+
+    #hyperparam-panel {
+        height: 9;
+    }
+
+    #hyperparam-panel.flash {
+        border: solid #39ff14;
+        background: #0d1f0d;
     }
 
     #metrics-panel {
@@ -321,6 +330,7 @@ class EvoLoRAApp(App[None]):
         self._requested_sample_count: int | None = 30
         self._goal = ""
         self._approval_context: str | None = None
+        self._hyperparams: dict = {}
 
     def compose(self) -> ComposeResult:
         with Container(id="frame"):
@@ -354,6 +364,9 @@ class EvoLoRAApp(App[None]):
                     with Vertical(id="config-panel", classes="panel"):
                         yield SectionTitle("-- LORA CONFIG")
                         yield Static("", id="config-values")
+                    with Vertical(id="hyperparam-panel", classes="panel"):
+                        yield SectionTitle("-- HYPERPARAMETERS")
+                        yield Static("", id="hyperparam-values")
                     with Vertical(id="metrics-panel", classes="panel"):
                         yield SectionTitle("-- TRAINING METRICS")
                         yield Static("", id="metrics-values")
@@ -387,6 +400,7 @@ class EvoLoRAApp(App[None]):
         self.set_interval(1, self._update_clock)
         self._update_clock()
         self._update_config_panel()
+        self._update_hyperparam_panel()
         self._update_metrics_panel()
         self.query_one("#goal-input", Input).focus()
 
@@ -585,6 +599,13 @@ class EvoLoRAApp(App[None]):
         if kind == EventKind.VALIDATION_COMPLETE:
             self._set_state("VALIDATE", event.message)
             self._agent_log().write(f"[green][OK][/] {event.message}")
+            hyperparams = data.get("hyperparams")
+            if hyperparams:
+                changed = hyperparams != self._hyperparams
+                self._hyperparams = dict(hyperparams)
+                self._update_hyperparam_panel(hyperparams)
+                if changed:
+                    self._flash_hyperparams()
             return
 
         if kind == EventKind.TRAINING_STARTED:
@@ -768,6 +789,41 @@ class EvoLoRAApp(App[None]):
 
         content = "\n".join(f"[#004018]{name:<11}[/] [#39ff14]{value}[/]" for name, value in lines)
         self.query_one("#config-values", Static).update(content)
+
+    def _update_hyperparam_panel(self, hyperparams: dict | None = None) -> None:
+        hp = hyperparams if hyperparams is not None else self._hyperparams
+        if not hp:
+            self.query_one("#hyperparam-values", Static).update(
+                "[#003010]awaiting first plan…[/]"
+            )
+            return
+        lr = hp.get("learning_rate")
+        lr_text = f"{lr:.1e}" if isinstance(lr, (int, float)) else str(lr)
+        rows = [
+            ("rank (r)", hp.get("r", "--")),
+            ("alpha", hp.get("lora_alpha", "--")),
+            ("learning_rate", lr_text),
+            ("epochs", hp.get("num_epochs", "--")),
+            ("batch", hp.get("batch_size", "--")),
+        ]
+        content = "\n".join(f"[#004018]{name:<13}[/] [#39ff14]{value}[/]" for name, value in rows)
+        self.query_one("#hyperparam-values", Static).update(content)
+
+    def _flash_hyperparams(self) -> None:
+        """Pulse the hyperparameter panel border to highlight a hyperparameter change."""
+        try:
+            panel = self.query_one("#hyperparam-panel")
+        except Exception:
+            return
+
+        def pulse(remaining: int) -> None:
+            if remaining <= 0:
+                panel.remove_class("flash")
+                return
+            panel.toggle_class("flash")
+            self.set_timer(0.16, lambda: pulse(remaining - 1))
+
+        pulse(6)
 
     def _update_metrics_panel(
         self,
