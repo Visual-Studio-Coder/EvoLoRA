@@ -57,18 +57,31 @@ class MicButton(Button):
 
 # Maps the run-state label shown in the status bar to a mascot mood.
 _STATE_MOOD = {
-    "READY": "idle", "INVALID": "sad",
-    "STARTING": "run", "RUNNING": "run",
-    "LOCKED": "think", "BASELINE": "look",
-    "PLANNING": "think", "VALIDATE": "run",
-    "TRAINING": "run", "TRAINED": "happy",
-    "EVALUATE": "look", "EVAL": "look",
-    "JUDGE": "look", "JUDGED": "think",
-    "DECIDE": "think", "APPROVE": "think",
-    "APPROVED": "run", "DECLINED": "idle",
-    "BEST": "happy", "ITERATION": "run",
-    "STOP": "idle", "DONE": "happy",
-    "CANCEL": "sad", "CANCELLED": "sad", "FAILED": "sad",
+    "READY": "idle",
+    "INVALID": "sad",
+    "STARTING": "run",
+    "RUNNING": "run",
+    "LOCKED": "think",
+    "BASELINE": "look",
+    "PLANNING": "think",
+    "VALIDATE": "run",
+    "TRAINING": "run",
+    "TRAINED": "happy",
+    "EVALUATE": "look",
+    "EVAL": "look",
+    "JUDGE": "look",
+    "JUDGED": "think",
+    "DECIDE": "think",
+    "APPROVE": "think",
+    "APPROVED": "run",
+    "DECLINED": "idle",
+    "BEST": "happy",
+    "ITERATION": "run",
+    "STOP": "idle",
+    "DONE": "happy",
+    "CANCEL": "sad",
+    "CANCELLED": "sad",
+    "FAILED": "sad",
 }
 
 
@@ -81,7 +94,11 @@ class Mascot(Static):
 
     # mood -> (animation frames, caption, scampers across the bar)
     MOODS = {
-        "idle": (["(=^.^=)", "(=^.^=)", "(=^.^=)", "(=^.^=)", "(=^.^=)", "(=^-^=)"], "purring", False),
+        "idle": (
+            ["(=^.^=)", "(=^.^=)", "(=^.^=)", "(=^.^=)", "(=^.^=)", "(=^-^=)"],
+            "purring",
+            False,
+        ),
         "think": (["(=o.o=)?", "(=o.o=) ", "(=O.o=)?", "(=o.O=)?"], "thinking", True),
         "run": (["(=^.^=)", "(=^o^=)"], "chasing", True),
         "look": (["(=O.O=)", "(=o.o=)", "(=O.O=)", "(=-.-=)"], "watching", True),
@@ -455,8 +472,8 @@ class EvoLoRAApp(App[None]):
                         yield SectionTitle("-- LORA CONFIG")
                         yield Select(
                             [
-                                ("Llama 3.1 8B", "unsloth/Meta-Llama-3.1-8B-Instruct"),
                                 ("Phi-3-mini (fast)", "unsloth/Phi-3-mini-4k-instruct"),
+                                ("Llama 3.1 8B", "unsloth/Meta-Llama-3.1-8B-Instruct"),
                             ],
                             id="base-model-select",
                             allow_blank=False,
@@ -474,7 +491,10 @@ class EvoLoRAApp(App[None]):
 
             with Horizontal(id="statusbar"):
                 yield Static("READY", id="run-state")
-                yield Static("mock backend idle | locked eval pending | agent: heuristic/MiniMax", id="status-text")
+                yield Static(
+                    "mock backend idle | locked eval pending | agent: heuristic/MiniMax",
+                    id="status-text",
+                )
                 yield Static("baseline -- | best --", id="score-text")
 
             with Horizontal(id="inputbar"):
@@ -683,8 +703,8 @@ class EvoLoRAApp(App[None]):
         return str(value)
 
     _BASE_MODELS = (
-        "unsloth/Meta-Llama-3.1-8B-Instruct",
         "unsloth/Phi-3-mini-4k-instruct",
+        "unsloth/Meta-Llama-3.1-8B-Instruct",
     )
 
     def _default_base_model(self) -> str:
@@ -726,7 +746,9 @@ class EvoLoRAApp(App[None]):
             model_dir = self._selected_model()
             reply = await backend.chat(prompt, model_dir)
             short = model_dir.replace("adapters/", "").split("/")[-1]
-            self._agent_log().write(f"[bold cyan]model ({short}) ›[/] {reply or '(empty response)'}")
+            self._agent_log().write(
+                f"[bold cyan]model ({short}) ›[/] {reply or '(empty response)'}"
+            )
         except Exception as exc:
             self._agent_log().write(f"[red][x] chat failed:[/] {exc}")
             self._agent_log().write(
@@ -771,7 +793,9 @@ class EvoLoRAApp(App[None]):
         self._agent_log().clear()
         self._examples_log().clear()
         if self._goal:
-            self._agent_log().write(f"[bright_green][>][/] Use case sent to agent: [bold]{self._goal}[/]")
+            self._agent_log().write(
+                f"[bright_green][>][/] Use case sent to agent: [bold]{self._goal}[/]"
+            )
         sample_label = (
             f"exactly {sample_count} training samples"
             if sample_count is not None
@@ -883,7 +907,9 @@ class EvoLoRAApp(App[None]):
         if kind == EventKind.RUN_STARTED:
             mode = "MOCK" if data.get("mock") else "REAL"
             self._set_state("RUNNING", f"{mode} run {event.run_id[:8]} started")
-            self._agent_log().write(f"[green][OK][/] EvoLoRA run started: [bold]{event.run_id[:8]}[/]")
+            self._agent_log().write(
+                f"[green][OK][/] EvoLoRA run started: [bold]{event.run_id[:8]}[/]"
+            )
             readable_log = self._current_readable_log_path()
             if readable_log:
                 self._agent_log().write(f"[cyan][log][/] Full run log: {readable_log}")
@@ -891,7 +917,9 @@ class EvoLoRAApp(App[None]):
 
         if kind == EventKind.EVAL_SET_LOCKED:
             self._set_state("LOCKED", event.message)
-            self._agent_log().write(f"[cyan][OK][/] Locked evaluation hash: {data.get('hash', '')[:16]}...")
+            self._agent_log().write(
+                f"[cyan][OK][/] Locked evaluation hash: {data.get('hash', '')[:16]}..."
+            )
             self._update_config_panel(eval_hash=str(data.get("hash", ""))[:12])
             return
 
@@ -916,7 +944,9 @@ class EvoLoRAApp(App[None]):
         if kind == EventKind.AGENT_FALLBACK_USED:
             reason = str(data.get("reason", "")).strip()
             detail = f": {reason}" if reason else ""
-            self._agent_log().write(f"[red][!][/] MiniMax unavailable; using heuristic fallback{detail}")
+            self._agent_log().write(
+                f"[red][!][/] MiniMax unavailable; using heuristic fallback{detail}"
+            )
             return
 
         if kind == EventKind.EVAL_APPROVAL_REQUIRED:
@@ -953,7 +983,9 @@ class EvoLoRAApp(App[None]):
 
         if kind == EventKind.TRAINING_STARTED:
             self._set_state("TRAINING", f"{event.message} | backend={data.get('backend', 'mock')}")
-            self._agent_log().write(f"[green][>][/] Training started on [bold]{data.get('backend', 'mock')}[/] backend")
+            self._agent_log().write(
+                f"[green][>][/] Training started on [bold]{data.get('backend', 'mock')}[/] backend"
+            )
             return
 
         if kind == EventKind.TRAINING_PROGRESS:
@@ -970,7 +1002,9 @@ class EvoLoRAApp(App[None]):
 
         if kind == EventKind.TRAINING_COMPLETE:
             self._set_state("TRAINED", f"training complete | mock={data.get('is_mock', True)}")
-            self._agent_log().write("[green][OK][/] Training complete; mock adapter artifact created")
+            self._agent_log().write(
+                "[green][OK][/] Training complete; mock adapter artifact created"
+            )
             return
 
         if kind == EventKind.EVAL_STARTED:
@@ -981,12 +1015,16 @@ class EvoLoRAApp(App[None]):
         if kind == EventKind.EVAL_COMPLETE:
             self._current = float(data.get("score", 0.0))
             self._set_state("EVAL", event.message)
-            self._agent_log().write(f"[blue][OK][/] Locked evaluation score: [bold]{self._current:.3f}[/]")
+            self._agent_log().write(
+                f"[blue][OK][/] Locked evaluation score: [bold]{self._current:.3f}[/]"
+            )
             self._update_score_text()
             return
 
         if kind == EventKind.ADAPTIVE_COMPLETE:
-            self._agent_log().write(f"[green][diag][/] Adaptive challenge score: {float(data.get('score', 0.0)):.3f}")
+            self._agent_log().write(
+                f"[green][diag][/] Adaptive challenge score: {float(data.get('score', 0.0)):.3f}"
+            )
             return
 
         if kind == EventKind.JUDGE_STARTED:
@@ -1092,7 +1130,9 @@ class EvoLoRAApp(App[None]):
         latest = record.iterations[-1]
         examples = latest.plan.data_spec.examples[:3]
         log = self._examples_log()
-        log.write(f"[green]iteration {latest.iteration} training data[/]: {len(latest.plan.data_spec.examples)} examples")
+        log.write(
+            f"[green]iteration {latest.iteration} training data[/]: {len(latest.plan.data_spec.examples)} examples"
+        )
         for index, example in enumerate(examples, start=1):
             prompt = str(example.get("prompt", "")).replace("\n", " ")[:100]
             completion = str(example.get("completion", "")).replace("\n", " ")[:100]
@@ -1146,9 +1186,7 @@ class EvoLoRAApp(App[None]):
     def _update_hyperparam_panel(self, hyperparams: dict | None = None) -> None:
         hp = hyperparams if hyperparams is not None else self._hyperparams
         if not hp:
-            self.query_one("#hyperparam-values", Static).update(
-                "[#003010]awaiting first plan…[/]"
-            )
+            self.query_one("#hyperparam-values", Static).update("[#003010]awaiting first plan…[/]")
             return
         lr = hp.get("learning_rate")
         lr_text = f"{lr:.1e}" if isinstance(lr, (int, float)) else str(lr)
@@ -1193,7 +1231,9 @@ class EvoLoRAApp(App[None]):
                 f"[#004018]baseline[/]    [#00cc33]{self._baseline:.3f}[/]",
                 f"[#004018]current[/]     [#00cc33]{self._current:.3f}[/]",
                 f"[#004018]best[/]        [#39ff14]{self._best:.3f}[/]",
-                f"[#004018]judge[/]       [#39ff14]{self._judge_rating:.3f}[/]" if self._judge_rating is not None else "[#004018]judge[/]       [#003010]--[/]",
+                f"[#004018]judge[/]       [#39ff14]{self._judge_rating:.3f}[/]"
+                if self._judge_rating is not None
+                else "[#004018]judge[/]       [#003010]--[/]",
             ]
         )
         self.query_one("#metrics-values", Static).update(content)
@@ -1228,8 +1268,12 @@ class EvoLoRAApp(App[None]):
             return None
         count = int(raw)
         if not 1 <= count <= 100000:
-            self._set_state("INVALID", "training sample count must be blank or between 1 and 100000")
-            self._agent_log().write("[red][x] Training sample count must be blank or between 1 and 100000[/]")
+            self._set_state(
+                "INVALID", "training sample count must be blank or between 1 and 100000"
+            )
+            self._agent_log().write(
+                "[red][x] Training sample count must be blank or between 1 and 100000[/]"
+            )
             self.query_one("#sample-count-input", Input).focus()
             return 0
         return count
