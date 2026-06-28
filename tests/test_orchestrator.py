@@ -352,24 +352,23 @@ async def test_judge_and_retrain_decision_are_recorded():
 
 
 @pytest.mark.asyncio
-async def test_user_can_decline_retrain_after_judge_recommendation():
+async def test_below_target_auto_iterates_without_asking():
+    # While the judge still wants more training (below target), the loop auto-iterates
+    # without prompting — no USER_APPROVAL_REQUIRED until the model is 'good enough'.
     cfg = RunConfig(max_iterations=2, target_score=1.0, require_retrain_approval=True)
     orch = Orchestrator(
         config=cfg,
         eval_set=LOCKED_EVAL_SET,
         adaptive_eval_set=ADAPTIVE_EVAL_SET,
         judge=StaticJudge(rating=0.25),
-        retrain_advisor=StaticRetrainAdvisor(retrain=True),
+        retrain_advisor=StaticRetrainAdvisor(retrain=True),  # judge wants more training
+        run_store=InMemoryRunStore(),
     )
-    events = []
-    async for event in await orch.run():
-        events.append(event)
-        if event.kind == EventKind.USER_APPROVAL_REQUIRED:
-            orch.submit_retrain_approval(False)
+    events, rec = await _collect(orch)
 
-    assert EventKind.USER_APPROVAL_REQUIRED in [e.kind for e in events]
-    assert orch._record.status == RunStatus.COMPLETE
-    assert orch._record.stop_reason == StopReason.USER_DECLINED_RETRAIN
+    # Key behavior: it never paused to ask, and ran more than one iteration on its own.
+    assert EventKind.USER_APPROVAL_REQUIRED not in [e.kind for e in events]
+    assert len(rec.iterations) == 2
 
 
 @pytest.mark.asyncio
