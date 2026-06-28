@@ -126,6 +126,10 @@ class FakeSSHClient:
         self.exec_kwargs.append(kwargs)
         if "baseline_evaluate.py" in command:
             return None, FakeStdout(["baseline 1\n", "baseline done\n"]), FakeStderr()
+        if "adapters/*/" in command:
+            return None, FakeStdout(
+                ["adapters/sql-abc123\n", "adapters/json-def456\n", "lora_model\n"]
+            ), FakeStderr()
         if "chat.py" in command:
             return None, FakeStdout(
                 ["unsloth banner\n", "<<<EVOLORA_RESPONSE>>>\n", "SELECT * FROM t;\n"]
@@ -176,11 +180,13 @@ async def test_remote_training_backend_pushes_files_runs_commands_and_yields_art
     events = [event async for event in stream]
     final = events[-1]
 
-    assert fake_client.commands == [
+    assert fake_client.commands[:2] == [
         "cd /workspace && python -u train.py",
         "cd /workspace && python -u evaluate.py",
     ]
-    assert fake_client.exec_kwargs == [{"get_pty": True}, {"get_pty": True}]
+    # third command archives the trained adapter for later chat/selection
+    assert "cp -r lora_model adapters/" in fake_client.commands[2]
+    assert fake_client.exec_kwargs[:2] == [{"get_pty": True}, {"get_pty": True}]
     assert json.loads(fake_client.sftp.files["/workspace/config.json"]) == {
         "learning_rate": 2e-4,
         "lora_alpha": 16,
@@ -252,11 +258,27 @@ async def test_remote_backend_chat_returns_model_response(tmp_path):
         chat_script_path=chat_script,
     )
 
-    reply = await backend.chat("write a query")
+    reply = await backend.chat("write a query", model_dir="adapters/sql-abc123")
 
     assert reply == "SELECT * FROM t;"  # extracted after the marker, banner stripped
     assert fake_client.sftp.files["/workspace/chat.py"] == "print('chat')\n"
-    assert any("python chat.py" in c for c in fake_client.commands)
+    # the selected model dir is passed to chat.py
+    assert any("python chat.py" in c and "adapters/sql-abc123" in c for c in fake_client.commands)
+
+
+@pytest.mark.asyncio
+async def test_remote_backend_list_adapters():
+    fake_client = FakeSSHClient()
+    backend = RemoteTrainingBackend(
+        ssh_host="gpu.example.com",
+        ssh_user="root",
+        ssh_key_path="C:/keys/evolora",
+        ssh_client_factory=lambda: fake_client,
+    )
+
+    models = await backend.list_adapters()
+
+    assert models == ["adapters/sql-abc123", "adapters/json-def456", "lora_model"]
 
 
 @pytest.mark.asyncio

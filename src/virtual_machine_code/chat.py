@@ -3,17 +3,19 @@ import torch
 import sys
 
 # ====================== CONFIG ======================
-model_dir = "lora_model"
 max_seq_length = 2048
 load_in_4bit = True
 # ====================================================
 
 if len(sys.argv) < 2:
     print("Error: Please provide an input prompt.")
-    print("Usage: python chat.py \"Your prompt here\"")
+    print("Usage: python chat.py \"Your prompt here\" [model_dir]")
     exit(1)
 
 user_input = sys.argv[1]
+# Optional 2nd arg selects which model to load: a trained adapter dir
+# (e.g. lora_model or adapters/<name>) or a base model name. Defaults to lora_model.
+model_dir = sys.argv[2] if len(sys.argv) > 2 else "lora_model"
 
 # 1. Load the fine-tuned model
 model, tokenizer = FastLanguageModel.from_pretrained(

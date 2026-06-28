@@ -177,6 +177,31 @@ async def test_tui_chat_toggle_flips_mode_and_is_blocked_during_run() -> None:
         assert app._chat_mode is False
 
 
+@pytest.mark.asyncio
+async def test_tui_model_dropdown_lists_trained_models(monkeypatch) -> None:
+    from textual.widgets import Select
+
+    monkeypatch.setattr(
+        tui_app,
+        "get_config",
+        lambda: Config(training_backend="remote", base_model_id="org/Phi-3-mini"),
+    )
+
+    class FakeBackend:
+        async def list_adapters(self):
+            return ["lora_model", "adapters/sql-abc"]
+
+    monkeypatch.setattr(tui_app, "get_backend", lambda _name: FakeBackend())
+
+    app = EvoLoRAApp()
+    async with app.run_test(size=(120, 40)):
+        await app._populate_models()
+        select = app.query_one("#model-select", Select)
+        assert select.value == "lora_model"  # defaults to the latest trained model
+        select.value = "adapters/sql-abc"  # a populated adapter option is selectable
+        assert app._selected_model() == "adapters/sql-abc"
+
+
 def test_tui_exception_writer_saves_traceback(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(tui_app, "default_log_dir", lambda: tmp_path)
     app = EvoLoRAApp()
