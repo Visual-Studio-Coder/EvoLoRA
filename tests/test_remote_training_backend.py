@@ -8,7 +8,7 @@ import pytest
 
 from evolora.demo.task import LOCKED_EVAL_SET
 from evolora.models.core import AgentPlan, LoraHyperparams, RunConfig, TrainingDataSpec
-from evolora.training.backends import RemoteTrainingBackend
+from evolora.training.backends import RemoteTrainingBackend, _adapter_label, _goal_slug
 from evolora.training.remote_config import (
     build_baseline_config_payload,
     build_training_config_payload,
@@ -290,3 +290,43 @@ async def test_remote_training_backend_requires_ssh_config():
     with pytest.raises(RuntimeError, match="SSH_HOST"):
         async for _ in stream:
             pass
+
+
+def test_goal_slug_leads_with_specialty_not_boilerplate():
+    # The generic "make a model that specializes in" lead-in is stripped so the slug
+    # describes what the model DOES.
+    assert _goal_slug("Make a model that specializes in writing SQL queries") == "sql-queries"
+    assert _goal_slug("Build me a model that specializes in SQL queries") == "sql-queries"
+    assert (
+        _goal_slug("I want a model that is good at extracting entities from text")
+        == "extracting-entities-from-text"
+    )
+    # A goal with no boilerplate is preserved as-is.
+    assert _goal_slug("JSON schema generator") == "json-schema-generator"
+
+
+def test_goal_slug_truncates_on_word_boundary():
+    slug = _goal_slug(
+        "Make a model that specializes in generating strict JSON that conforms to a schema",
+        max_len=40,
+    )
+    assert len(slug) <= 40
+    assert not slug.endswith("-")
+    # never ends mid-word: the truncated slug is a prefix of words from the source
+    assert slug == "strict-json-that-conforms-to-a-schema"
+
+
+def test_adapter_label_is_meaningful_and_unique():
+    label = _adapter_label("Make a model that specializes in writing SQL queries", "1a2b3c4d-ef")
+    # leads with the specialty, not the boilerplate prefix
+    assert label.startswith("sql-queries-")
+    assert "specializes" not in label
+    # short, filesystem-safe id tag for uniqueness/traceability
+    assert label == "sql-queries-1a2b3c"
+    # different runs of the same goal stay distinct
+    other = _adapter_label("Make a model that specializes in writing SQL queries", "99887766-zz")
+    assert other != label and other.startswith("sql-queries-")
+
+
+def test_adapter_label_handles_empty_goal():
+    assert _adapter_label("", "abcdef12") == "model-abcdef"

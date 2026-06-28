@@ -332,7 +332,7 @@ class RemoteTrainingBackend:
         """Copy the just-trained lora_model to adapters/<slug> so it persists and
         becomes selectable for chat. Best-effort; returns the archive label."""
         goal = str((remote_payload or {}).get("goal") or "model")
-        label = f"{_slugify(goal)[:32] or 'model'}-{run_id[:6]}"
+        label = _adapter_label(goal, run_id)
         target = f"adapters/{label}"
         command = (
             f"cd {self._remote_workspace} && mkdir -p adapters && "
@@ -443,6 +443,54 @@ def _slugify(text: str) -> str:
     """Filesystem-safe slug for adapter archive names."""
     slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
     return slug or "model"
+
+
+# Generic lead-in phrasing nearly every goal shares ("make a model that specializes in …").
+# Stripping it means saved adapters lead with what they actually DO — e.g. ``strict-json-schema``
+# rather than a near-identical ``make-a-model-that-specializes-in`` prefix on every run.
+_GOAL_LEADIN = re.compile(
+    r"^(?:please\s+)?"
+    r"(?:(?:can|could|would)\s+you\s+)?"
+    r"(?:i\s+(?:want|need)\s+(?:you\s+to\s+)?|help\s+me\s+)?"
+    r"(?:(?:make|build|create|train|develop|produce|generate|fine[\s-]*tune|give\s+me)\s+)?"
+    r"(?:me\s+)?(?:an?|the)?\s*"
+    r"(?:model|llm|adapter|assistant|bot)?\s*"
+    r"(?:that\s+|which\s+|to\s+|for\s+)?"
+    r"(?:can\s+)?"
+    r"(?:specializ\w*\s+in\s+|special\w*\s+in\s+|"
+    r"focus(?:es|ed|ing)?\s+on\s+|is\s+(?:good|great|expert)\s+at\s+|"
+    r"good\s+at\s+|expert\s+(?:in|at)\s+)?"
+    r"(?:generat\w*\s+|writ\w*\s+|produc\w*\s+|creat\w*\s+|output\w*\s+|"
+    r"answer\w*\s+|handl\w*\s+)?",
+    re.IGNORECASE,
+)
+
+
+def _goal_slug(goal: str, max_len: int = 40) -> str:
+    """Slug of the goal's distinguishing specialty, with shared lead-in phrasing removed.
+
+    "Make a model that specializes in generating strict JSON" -> "strict-json".
+    Truncates on a word boundary so the slug never ends mid-word. Falls back to the
+    full-goal slug if stripping the lead-in leaves nothing.
+    """
+    text = (goal or "").strip()
+    stripped = _GOAL_LEADIN.sub("", text, count=1).strip()
+    slug = _slugify(stripped or text)
+    if len(slug) > max_len:
+        slug = slug[:max_len].rsplit("-", 1)[0].strip("-") or slug[:max_len].strip("-")
+    return slug or "model"
+
+
+def _adapter_label(goal: str, run_id: str) -> str:
+    """Human-readable, unique adapter directory name: ``<specialty>-<short-id>``.
+
+    The specialty leads (so saved models read as ``strict-json-1a2b3c`` instead of a
+    generic ``make-a-model-that-specializes-in-1a2b3c``), and a short run-id tag keeps
+    names unique and traceable back to the run log.
+    """
+    slug = _goal_slug(goal)
+    tag = re.sub(r"[^a-z0-9]", "", (run_id or "").lower())[:6]
+    return "-".join(part for part in (slug, tag) if part) or "model"
 
 
 def _try_unsloth_backend():
