@@ -387,3 +387,45 @@ async def test_judge_acceptance_stops_without_more_training():
     assert len(rec.iterations) == 1
     assert rec.status == RunStatus.COMPLETE
     assert rec.stop_reason == StopReason.JUDGE_ACCEPTED
+
+
+@pytest.mark.asyncio
+async def test_keep_training_gate_lets_user_stop_when_judge_accepts():
+    cfg = RunConfig(max_iterations=2, target_score=1.0, require_retrain_approval=True)
+    orch = Orchestrator(
+        config=cfg,
+        eval_set=LOCKED_EVAL_SET,
+        adaptive_eval_set=ADAPTIVE_EVAL_SET,
+        judge=StaticJudge(rating=0.95),
+        retrain_advisor=StaticRetrainAdvisor(retrain=False),  # judge says good enough
+        run_store=InMemoryRunStore(),
+    )
+    events = []
+    async for event in await orch.run():
+        events.append(event)
+        if event.kind == EventKind.USER_APPROVAL_REQUIRED:
+            assert event.data.get("approval_type") == "keep_training"
+            orch.submit_retrain_approval(False)  # user accepts the model -> stop
+
+    assert EventKind.USER_APPROVAL_REQUIRED in [e.kind for e in events]
+    assert orch._record.stop_reason == StopReason.JUDGE_ACCEPTED
+    assert len(orch._record.iterations) == 1
+
+
+@pytest.mark.asyncio
+async def test_keep_training_gate_continues_when_user_wants_more():
+    cfg = RunConfig(max_iterations=2, target_score=1.0, require_retrain_approval=True)
+    orch = Orchestrator(
+        config=cfg,
+        eval_set=LOCKED_EVAL_SET,
+        adaptive_eval_set=ADAPTIVE_EVAL_SET,
+        judge=StaticJudge(rating=0.95),
+        retrain_advisor=StaticRetrainAdvisor(retrain=False),
+        run_store=InMemoryRunStore(),
+    )
+    async for event in await orch.run():
+        if event.kind == EventKind.USER_APPROVAL_REQUIRED:
+            orch.submit_retrain_approval(True)  # keep training to make it smarter
+
+    # judge accepted at iter 1 but the user pushed on; ran the 2nd (max) iteration too
+    assert len(orch._record.iterations) == 2

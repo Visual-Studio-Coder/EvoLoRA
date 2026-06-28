@@ -613,6 +613,11 @@ class EvoLoRAApp(App[None]):
         self._set_retrain_buttons(False)
         context = self._approval_context or "retrain"
         self._approval_context = None
+        if context == "keep_training":
+            self._agent_log().write(
+                f"[yellow][user][/] {'Keep training' if approved else 'Stop — model accepted'}"
+            )
+            return
         answer = "approved" if approved else "declined"
         label = "Generated eval set" if context == "evals" else "Retrain"
         self._agent_log().write(f"[yellow][user][/] {label} {answer}")
@@ -831,11 +836,19 @@ class EvoLoRAApp(App[None]):
 
         if kind == EventKind.USER_APPROVAL_REQUIRED:
             rating = float(data.get("rating", 0.0))
-            self._approval_context = "retrain"
-            self._set_state("APPROVE", f"Retrain? judge rating {rating:.2f} | YES or NO")
-            self._agent_log().write(
-                f"[yellow][?][/] Retraining is recommended. Judge rating: [bold]{rating:.2f}[/]. Choose YES or NO."
-            )
+            if str(data.get("approval_type", "retrain")) == "keep_training":
+                self._approval_context = "keep_training"
+                self._set_state("APPROVE", f"Keep training? rating {rating:.2f} | YES=more NO=stop")
+                self._agent_log().write(
+                    f"[yellow][?][/] Good enough (rating [bold]{rating:.2f}[/]). Keep training to make it "
+                    "smarter? [bold]YES[/] = another round, [bold]NO[/] = stop here."
+                )
+            else:
+                self._approval_context = "retrain"
+                self._set_state("APPROVE", f"Retrain? judge rating {rating:.2f} | YES or NO")
+                self._agent_log().write(
+                    f"[yellow][?][/] Retraining is recommended. Judge rating: [bold]{rating:.2f}[/]. Choose YES or NO."
+                )
             self._set_retrain_buttons(True)
             return
 

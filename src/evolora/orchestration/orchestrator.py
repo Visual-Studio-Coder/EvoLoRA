@@ -76,6 +76,7 @@ class Orchestrator:
         self._record = RunRecord(config=config)
         self._run_logger = run_logger or RunLogger(self._record.run_id)
         self._accumulated_examples: list[dict] = []
+        self._keep_training = False
 
     def cancel(self) -> None:
         self._cancelled = True
@@ -437,10 +438,22 @@ class Orchestrator:
             await self._store.save(rec)
 
             if retrain_decision is not None and not retrain_decision.retrain_recommended:
+                # The judge/advisor thinks it's good enough — but don't auto-stop. Let the
+                # user decide whether to keep training to make it even smarter.
+                if rec.config.require_retrain_approval and iteration < rec.config.max_iterations:
+                    rating = judge_report.rating if judge_report else score
+                    summary = judge_report.summary if judge_report else ""
+                    async for ev in self._keep_training_gate(emit, rating, summary, "judge accepted"):
+                        yield ev
+                    if self._cancelled:
+                        yield await self._finish(rec, RunStatus.CANCELLED, StopReason.CANCELLED, emit)
+                        return
+                    if self._keep_training:
+                        continue  # user wants another round
                 advisor_name = "heuristic advisor" if retrain_decision.is_mock else "MiniMax"
                 yield await emit(
                     EventKind.STOP_CONDITION_MET,
-                    f"Stop: {advisor_name} accepted the current adapter after judge review",
+                    f"Stop: {advisor_name} accepted the current adapter (user did not request more)",
                     reason=StopReason.JUDGE_ACCEPTED.value,
                 )
                 yield await self._finish(rec, RunStatus.COMPLETE, StopReason.JUDGE_ACCEPTED, emit)
@@ -482,6 +495,19 @@ class Orchestrator:
 
             # --- STOP CONDITIONS ---
             stop = self._check_stop(rec, score)
+            if (
+                stop == StopReason.TARGET_SCORE
+                and rec.config.require_retrain_approval
+                and iteration < rec.config.max_iterations
+            ):
+                # Hit the target — but the judge/target shouldn't stop you. Ask the user.
+                async for ev in self._keep_training_gate(emit, score, "", "target score reached"):
+                    yield ev
+                if self._cancelled:
+                    yield await self._finish(rec, RunStatus.CANCELLED, StopReason.CANCELLED, emit)
+                    return
+                if self._keep_training:
+                    continue  # user wants to keep going
             if stop:
                 yield await emit(EventKind.STOP_CONDITION_MET, f"Stop: {stop.value}", reason=stop.value)
                 yield await self._finish(rec, RunStatus.COMPLETE, stop, emit)
@@ -632,6 +658,29 @@ class Orchestrator:
             return []
         last = rec.iterations[-1]
         return [r for r in last.eval_results if not r.passed]
+
+    async def _keep_training_gate(self, emit, rating: float, summary: str, reason: str):
+        """Ask the user whether to keep training to make the model smarter instead of
+        auto-stopping when the judge/target says 'good enough'. Stores the answer in
+        self._keep_training (True = keep going, False = stop)."""
+        self._approval_future = asyncio.get_running_loop().create_future()
+        yield await emit(
+            EventKind.USER_APPROVAL_REQUIRED,
+            f"Good enough ({reason}, rating {rating:.2f}) — keep training to make it smarter? "
+            "YES = another round, NO = stop here.",
+            rating=rating,
+            summary=summary,
+            approval_type="keep_training",
+        )
+        keep = await self._approval_future
+        self._approval_future = None
+        self._keep_training = keep
+        yield await emit(
+            EventKind.USER_APPROVAL_RECEIVED,
+            "User chose to keep training" if keep else "User accepted the model — stopping",
+            approved=keep,
+            approval_type="keep_training",
+        )
 
     def _check_stop(self, rec: RunRecord, score: float) -> StopReason | None:
         cfg = rec.config
