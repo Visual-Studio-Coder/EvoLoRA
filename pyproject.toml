@@ -30,6 +30,13 @@ unsloth = [
     "datasets",
     "trl",
 ]
+# Voice features (dictation + narrator) — optional, fully decoupled from training.
+# LiveKit Inference STT/TTS, local audio I/O, and an optional global push-to-talk key.
+voice = [
+    "livekit-agents>=1.0",
+    "sounddevice>=0.4",
+    "pynput>=1.7",
+]
 
 [project.scripts]
 evolora = "evolora.cli:app"

@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
 import traceback
 from datetime import datetime
 
+from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
+from textual.message import Message
 from textual.widgets import Button, Input, ProgressBar, RichLog, Select, Static
 
 from evolora.agent.planner import get_planner
@@ -21,10 +25,34 @@ from evolora.orchestration.orchestrator import Orchestrator
 from evolora.orchestration.retrain_advisor import get_retrain_advisor
 from evolora.training.backends import get_backend
 from evolora.training.runner import get_runner
+from evolora.voice import VoiceService
 
 
 class SectionTitle(Static):
     """Small green terminal-style section label."""
+
+
+class MicButton(Button):
+    """Push-to-talk button: hold (mouse down) to dictate, release to stop.
+
+    Textual doesn't deliver key-up events, but it does deliver mouse up/down, so a
+    held button gives true hold-to-talk. Mouse capture keeps the release reliable even
+    if the pointer drifts off the button while held.
+    """
+
+    class HoldStart(Message):
+        pass
+
+    class HoldEnd(Message):
+        pass
+
+    def on_mouse_down(self, event: events.MouseDown) -> None:
+        self.capture_mouse()
+        self.post_message(self.HoldStart())
+
+    def on_mouse_up(self, event: events.MouseUp) -> None:
+        self.release_mouse()
+        self.post_message(self.HoldEnd())
 
 
 # Maps the run-state label shown in the status bar to a mascot mood.
@@ -103,6 +131,7 @@ class EvoLoRAApp(App[None]):
         Binding("ctrl+r", "start_run", "Start run"),
         Binding("ctrl+x", "cancel_run", "Cancel run"),
         Binding("ctrl+y", "copy_log", "Copy agent log"),
+        Binding("ctrl+m", "toggle_mute", "Mute voice"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -146,6 +175,20 @@ class EvoLoRAApp(App[None]):
         width: 22;
         content-align: right middle;
         color: #003010;
+    }
+
+    #mute-button {
+        min-width: 10;
+        height: 1;
+        margin: 0 0 0 2;
+        background: #00280d;
+        color: #39ff14;
+        border: none;
+    }
+
+    #mute-button.muted {
+        background: #120606;
+        color: #aa5544;
     }
 
     #main {
@@ -294,6 +337,21 @@ class EvoLoRAApp(App[None]):
         border: solid #006622;
     }
 
+    #mic-button {
+        min-width: 11;
+        margin: 0 0 0 1;
+        background: #00280d;
+        color: #39ff14;
+        border: solid #006622;
+    }
+
+    #mic-button.live {
+        background: #063b30;
+        color: #5ff5e0;
+        border: solid #2ad6c0;
+        text-style: bold;
+    }
+
     #chat-toggle {
         min-width: 12;
         margin: 0 0 0 1;
@@ -360,6 +418,8 @@ class EvoLoRAApp(App[None]):
         self._goal = ""
         self._approval_context: str | None = None
         self._hyperparams: dict = {}
+        self._voice: VoiceService | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     def compose(self) -> ComposeResult:
         with Container(id="frame"):
@@ -367,6 +427,7 @@ class EvoLoRAApp(App[None]):
                 yield Static("> EvoLoRA", id="brand")
                 yield Mascot(id="mascot")
                 yield Static("", id="clock")
+                yield Button("\U0001f50a ON", id="mute-button")
 
             with Horizontal(id="main"):
                 with Vertical(id="left-column"):
@@ -421,6 +482,7 @@ class EvoLoRAApp(App[None]):
                     placeholder="What kind of specialized model would you like to build today?",
                     id="goal-input",
                 )
+                yield MicButton("\U0001f3a4 HOLD", id="mic-button")
                 yield Static("# samples", id="sample-label")
                 yield Input(
                     value="30",
@@ -448,6 +510,86 @@ class EvoLoRAApp(App[None]):
         self._update_hyperparam_panel()
         self._update_metrics_panel()
         self.query_one("#goal-input", Input).focus()
+        self._init_voice()
+
+    # ------------------------------------------------------------------ voice
+
+    def _init_voice(self) -> None:
+        """Bring up voice (dictation + narrator) — best-effort, never blocks the TUI."""
+        # Never start audio/network/global-key listeners inside the test suite.
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            return
+        self._loop = asyncio.get_running_loop()
+        self._voice = VoiceService.create(get_config(), self._loop)
+        self._voice.register_dictation_handlers(self._voice_interim, self._voice_final)
+        self.run_worker(self._voice_start(), group="voice-init")
+
+    async def _voice_start(self) -> None:
+        assert self._voice is not None
+        status = await self._voice.start()
+        self._voice.start_ptt_key()
+        self._refresh_mute_button()
+        self._agent_log().write(f"[#2ad6c0][voice][/] {status}")
+        if self._voice.enabled:
+            ptt = get_config().ptt_key.upper()
+            self._agent_log().write(
+                f"[#2ad6c0][voice][/] Hold the [bold]\U0001f3a4 MIC[/] button (or {ptt}) to dictate. "
+                "Narrator is live; [bold]Ctrl+M[/] or the corner button mutes all sound."
+            )
+
+    def _voice_interim(self, text: str) -> None:
+        """Live transcript → goal/chat input box (called on the TUI loop)."""
+        try:
+            inp = self.query_one("#goal-input", Input)
+            inp.value = text
+            inp.cursor_position = len(text)
+        except Exception:
+            pass
+
+    def _voice_final(self, text: str) -> None:
+        self._voice_interim(text)
+        try:
+            self.query_one("#goal-input", Input).focus()
+        except Exception:
+            pass
+
+    def on_mic_button_hold_start(self, event: MicButton.HoldStart) -> None:
+        if not (self._voice and self._voice.enabled):
+            self._agent_log().write("[#805000][mic] voice is off (no LiveKit creds / device)[/]")
+            return
+        self.query_one("#mic-button", MicButton).add_class("live")
+        self.run_worker(self._voice.begin_dictation(), group="voice-dictation-start")
+
+    def on_mic_button_hold_end(self, event: MicButton.HoldEnd) -> None:
+        if not (self._voice and self._voice.enabled):
+            return
+        self.query_one("#mic-button", MicButton).remove_class("live")
+        self.run_worker(self._voice.end_dictation(), group="voice-dictation-stop")
+
+    def action_toggle_mute(self) -> None:
+        if self._voice is None:
+            return
+        self._voice.toggle_mute()
+        self._refresh_mute_button()
+
+    def _refresh_mute_button(self) -> None:
+        try:
+            btn = self.query_one("#mute-button", Button)
+        except Exception:
+            return
+        if self._voice is None or not self._voice.enabled:
+            btn.label = "\U0001f507 OFF"
+            btn.add_class("muted")
+        elif self._voice.muted:
+            btn.label = "\U0001f507 MUTED"
+            btn.add_class("muted")
+        else:
+            btn.label = "\U0001f50a ON"
+            btn.remove_class("muted")
+
+    async def on_unmount(self) -> None:
+        if self._voice is not None:
+            await self._voice.aclose()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "start-button":
@@ -456,6 +598,8 @@ class EvoLoRAApp(App[None]):
             self.action_cancel_run()
         elif event.button.id == "chat-toggle":
             self.action_toggle_chat()
+        elif event.button.id == "mute-button":
+            self.action_toggle_mute()
         elif event.button.id == "approve-retrain-button":
             self.action_answer_retrain(True)
         elif event.button.id == "decline-retrain-button":
@@ -671,7 +815,7 @@ class EvoLoRAApp(App[None]):
             base_model_id=self._selected_base_model(),
             training_sample_count=self._requested_sample_count,
             goal=self._goal,
-            require_retrain_approval=True,
+            require_retrain_approval=not cfg.auto_approve,  # AUTO_APPROVE=true -> autonomous
         )
 
         backend = get_backend(cfg.training_backend)
@@ -727,6 +871,11 @@ class EvoLoRAApp(App[None]):
             self._update_examples_from_record()
 
     def _apply_event(self, event: Event) -> None:
+        # Feed the live event stream to the narrator first (non-blocking, best-effort).
+        # This is the ONLY coupling to voice — it can never affect the run.
+        if self._voice is not None:
+            self._voice.observe(event)
+
         kind = event.kind
         data = event.data
 

@@ -44,6 +44,8 @@ class Config(BaseModel):
     target_score: float = Field(default=0.85)
     improvement_threshold: float = Field(default=0.01)
     patience: int = Field(default=2)
+    # AUTO_APPROVE=true -> fully autonomous (no approval gates).
+    auto_approve: bool = Field(default=False)
 
     # DigitalOcean
     digitalocean_inference_base_url: str = Field(
@@ -52,6 +54,18 @@ class Config(BaseModel):
     digital_ocean_model_access_key: str = Field(default="")
     digital_ocean_judge_model: str = Field(default="llama3.3-70b-instruct")
     digitalocean_token: str = Field(default="")
+
+    # Voice (LiveKit Inference STT/TTS) — optional, fully decoupled from training.
+    livekit_url: str = Field(default="")
+    livekit_api_key: str = Field(default="")
+    livekit_api_secret: str = Field(default="")
+    voice_enabled: bool = Field(default=True)
+    stt_model: str = Field(default="deepgram/nova-3")
+    tts_model: str = Field(default="cartesia/sonic-3")
+    tts_voice: str = Field(default="9626c31c-bec5-4cca-baa8-f8ba9e84c8bc")
+    narrate_interval: float = Field(default=30.0)
+    narrate_polish: bool = Field(default=True)  # rephrase template lines via MiniMax when available
+    ptt_key: str = Field(default="f9")  # global push-to-talk key (pynput name)
 
     @property
     def mock_mode(self) -> bool:
@@ -68,6 +82,20 @@ class Config(BaseModel):
     @property
     def digital_ocean_judge_available(self) -> bool:
         return bool(self.digital_ocean_model_access_key)
+
+    @property
+    def voice_available(self) -> bool:
+        """Voice can run only when enabled and all LiveKit creds are present.
+
+        Package import + audio-device availability are checked at runtime by the
+        VoiceService; this just gates on config so the TUI can decide whether to try.
+        """
+        return bool(
+            self.voice_enabled
+            and self.livekit_url
+            and self.livekit_api_key
+            and self.livekit_api_secret
+        )
 
 
 @lru_cache(maxsize=1)
@@ -108,4 +136,17 @@ def get_config() -> Config:
         ),
         base_model_id=os.getenv("BASE_MODEL_ID", "microsoft/Phi-3-mini-128k-instruct"),
         digitalocean_token=os.getenv("DIGITALOCEAN_TOKEN", ""),
+        auto_approve=os.getenv("AUTO_APPROVE", "false").strip().lower() in {"1", "true", "yes", "on"},
+        livekit_url=os.getenv("LIVEKIT_URL", ""),
+        livekit_api_key=os.getenv("LIVEKIT_API_KEY", ""),
+        livekit_api_secret=os.getenv("LIVEKIT_API_SECRET", ""),
+        voice_enabled=os.getenv("VOICE_ENABLED", "true").strip().lower()
+        not in {"0", "false", "off", "no"},
+        stt_model=os.getenv("STT_MODEL", "deepgram/nova-3"),
+        tts_model=os.getenv("TTS_MODEL", "cartesia/sonic-3"),
+        tts_voice=os.getenv("TTS_VOICE", "9626c31c-bec5-4cca-baa8-f8ba9e84c8bc"),
+        narrate_interval=float(os.getenv("NARRATE_INTERVAL", "30")),
+        narrate_polish=os.getenv("NARRATE_POLISH", "true").strip().lower()
+        not in {"0", "false", "off", "no"},
+        ptt_key=os.getenv("PTT_KEY", "f9"),
     )
