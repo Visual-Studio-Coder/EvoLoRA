@@ -19,7 +19,8 @@ lora_alpha = config["lora_alpha"]
 num_train_epochs = config["num_train_epochs"]
 per_device_train_batch_size = config["per_device_train_batch_size"]
 
-model_name = "unsloth/Phi-3-mini-4k-instruct"
+# Use the base model from config.json (set by EvoLoRA) so the model is configurable.
+model_name = config.get("base_model_id") or "unsloth/Meta-Llama-3.1-8B-Instruct"
 max_seq_length = 2048
 load_in_4bit = True
 gradient_accumulation_steps = 4

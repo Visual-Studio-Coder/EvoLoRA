@@ -6,7 +6,7 @@ from unsloth import FastLanguageModel
 # ====================== CONFIG ======================
 config_path = "config.json"
 evals_path = "data/evals.json"
-default_model_name = "unsloth/Phi-3-mini-4k-instruct"
+default_model_name = "unsloth/Meta-Llama-3.1-8B-Instruct"
 max_seq_length = 2048
 load_in_4bit = True
 # ====================================================

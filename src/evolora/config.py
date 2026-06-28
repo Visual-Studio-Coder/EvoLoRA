@@ -21,7 +21,7 @@ class Config(BaseModel):
     # Training
     training_backend: str = Field(default="mock")  # mock | unsloth | remote
     model_runner: str = Field(default="mock")       # mock | local | remote
-    base_model_id: str = Field(default="microsoft/Phi-3-mini-128k-instruct")
+    base_model_id: str = Field(default="unsloth/Meta-Llama-3.1-8B-Instruct")
 
     # Remote GPU config push
     ssh_host: str = Field(default="")
@@ -106,6 +106,6 @@ def get_config() -> Config:
         digital_ocean_judge_model=os.getenv(
             "DIGITAL_OCEAN_JUDGE_MODEL", "llama3.3-70b-instruct"
         ),
-        base_model_id=os.getenv("BASE_MODEL_ID", "microsoft/Phi-3-mini-128k-instruct"),
+        base_model_id=os.getenv("BASE_MODEL_ID", "unsloth/Meta-Llama-3.1-8B-Instruct"),
         digitalocean_token=os.getenv("DIGITALOCEAN_TOKEN", ""),
     )
