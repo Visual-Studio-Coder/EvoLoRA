@@ -55,6 +55,7 @@ def test_build_training_config_payload_includes_gpu_inputs() -> None:
     assert payload["iteration"] == 2
     assert payload["training_backend"] == "remote"
     assert payload["vm_config"] == {
+        "base_model_id": cfg.base_model_id,  # train.py reads the model from config.json
         "learning_rate": 1e-4,
         "lora_rank": 16,
         "lora_alpha": 32,
