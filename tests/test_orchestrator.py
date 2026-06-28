@@ -413,6 +413,45 @@ async def test_keep_training_gate_lets_user_stop_when_judge_accepts():
 
 
 @pytest.mark.asyncio
+async def test_adaptive_hardens_evals_when_base_model_aces_them():
+    class HardeningPlanner(MiniMaxPlanner):
+        def __init__(self):
+            self.difficulties: list[str] = []
+
+        async def generate_evals(self, goal, count=5, difficulty="standard"):
+            self.difficulties.append(difficulty)
+            tag = "hard" if difficulty == "hard" else "easy"
+            return [{"prompt": f"{tag}-q{i}", "expected": {"ok": True}} for i in range(count)]
+
+        async def plan(self, *args, **kwargs):
+            return HeuristicPlanner().plan(*args, **kwargs), False
+
+    planner = HardeningPlanner()
+    cfg = RunConfig(max_iterations=1, target_score=1.0, goal="sql queries")
+    orch = Orchestrator(
+        config=cfg, eval_set=LOCKED_EVAL_SET, planner=planner, run_store=InMemoryRunStore()
+    )
+
+    # Force the base model to ace the first (easy) eval set so hardening triggers.
+    scores = iter([0.9, 0.3])
+
+    async def fake_eval(adapter_path=None, eval_set=None):
+        return next(scores, 0.3), [], {}
+
+    orch._eval = fake_eval
+
+    events = []
+    async for event in await orch.run():
+        events.append(event)
+        if event.kind == EventKind.EVAL_APPROVAL_REQUIRED:
+            orch.submit_retrain_approval(True)
+
+    assert "hard" in planner.difficulties  # regenerated a harder eval set
+    baselines = [e for e in events if e.kind == EventKind.BASELINE_COMPLETE]
+    assert len(baselines) == 2  # initial baseline + re-baseline on harder evals
+
+
+@pytest.mark.asyncio
 async def test_keep_training_gate_continues_when_user_wants_more():
     cfg = RunConfig(max_iterations=2, target_score=1.0, require_retrain_approval=True)
     orch = Orchestrator(
