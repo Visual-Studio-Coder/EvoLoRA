@@ -777,7 +777,9 @@ class EvoLoRAApp(App[None]):
         lines = [
             ("base_model", cfg.base_model_id.split("/")[-1]),
             ("backend", cfg.training_backend),
-            ("runner", cfg.model_runner),
+            # In remote mode the mock runner is bypassed — baseline + eval run the real model
+            # on the VM and are LLM-judged. Show that instead of the unused "mock" label.
+            ("runner", "vm (remote)" if cfg.training_backend == "remote" else cfg.model_runner),
             ("agent", "MiniMax" if cfg.minimax_available else "heuristic"),
             (
                 "samples",
