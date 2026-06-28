@@ -21,7 +21,7 @@ class Config(BaseModel):
     # Training
     training_backend: str = Field(default="mock")  # mock | unsloth | remote
     model_runner: str = Field(default="mock")       # mock | local | remote
-    base_model_id: str = Field(default="microsoft/Phi-3-mini-128k-instruct")
+    base_model_id: str = Field(default="unsloth/Phi-3-mini-4k-instruct")
 
     # Remote GPU config push
     ssh_host: str = Field(default="")
@@ -44,7 +44,8 @@ class Config(BaseModel):
     target_score: float = Field(default=0.85)
     improvement_threshold: float = Field(default=0.01)
     patience: int = Field(default=2)
-    # AUTO_APPROVE=true -> fully autonomous (no approval gates).
+    # When true, the run is fully autonomous: no user approvals (eval set + keep-training
+    # gates are skipped), it iterates until the target/judge is satisfied or max iterations.
     auto_approve: bool = Field(default=False)
 
     # DigitalOcean
@@ -134,7 +135,7 @@ def get_config() -> Config:
         digital_ocean_judge_model=os.getenv(
             "DIGITAL_OCEAN_JUDGE_MODEL", "llama3.3-70b-instruct"
         ),
-        base_model_id=os.getenv("BASE_MODEL_ID", "microsoft/Phi-3-mini-128k-instruct"),
+        base_model_id=os.getenv("BASE_MODEL_ID", "unsloth/Phi-3-mini-4k-instruct"),
         digitalocean_token=os.getenv("DIGITALOCEAN_TOKEN", ""),
         auto_approve=os.getenv("AUTO_APPROVE", "false").strip().lower() in {"1", "true", "yes", "on"},
         livekit_url=os.getenv("LIVEKIT_URL", ""),
