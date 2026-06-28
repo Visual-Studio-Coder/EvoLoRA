@@ -10,6 +10,7 @@ handles it; if anything fails, ``HeuristicPlanner`` produces a valid plan with n
 from __future__ import annotations
 
 import json
+import random
 import re
 from typing import Any
 
@@ -323,12 +324,19 @@ class MiniMaxPlanner:
         """
         client = self._make_client()
         create_evals_tools = [t for t in TOOLS if t["function"]["name"] == "create_evals"]
+        # A fresh seed per call nudges MiniMax to produce a NEW, diverse eval set each run
+        # instead of converging on the same canonical examples (low temp made it look static).
+        variation_seed = random.randint(1, 9_999_999)
         user_prompt = json.dumps({
             "goal": goal,
             "count": count,
+            "variation_seed": variation_seed,
             "instruction": (
                 f"Call create_evals with criteria and exactly {count} eval_examples for this "
-                "goal. Each expected_output must be the single correct JSON output for its prompt."
+                "goal. Generate a FRESH, DIVERSE set each time: vary the scenarios, difficulty, "
+                "and edge cases, and do NOT reuse a fixed canonical set — use variation_seed "
+                f"{variation_seed} to diversify. Each expected_output must be the single correct "
+                "JSON output for its prompt."
             ),
         })
         try:
@@ -340,7 +348,7 @@ class MiniMaxPlanner:
                 ],
                 tools=create_evals_tools,
                 tool_choice={"type": "function", "function": {"name": "create_evals"}},
-                temperature=0.2,
+                temperature=0.9,
                 max_tokens=MINIMAX_EVAL_MAX_TOKENS,
             )
             tool_calls = resp.choices[0].message.tool_calls or []
