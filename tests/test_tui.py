@@ -107,10 +107,10 @@ async def test_tui_base_model_selection_feeds_run_config(
 
     app = EvoLoRAApp()
     async with app.run_test(size=(140, 40)) as pilot:
-        # defaults to the 8B model
-        assert app._selected_base_model() == "unsloth/Meta-Llama-3.1-8B-Instruct"
-        # user picks the Phi model instead
-        app.query_one("#base-model-select", Select).value = "unsloth/Phi-3-mini-4k-instruct"
+        # defaults to the Phi model
+        assert app._selected_base_model() == "unsloth/Phi-3-mini-4k-instruct"
+        # user picks the 8B model instead
+        app.query_one("#base-model-select", Select).value = "unsloth/Meta-Llama-3.1-8B-Instruct"
         app.query_one("#goal-input", Input).value = "sql queries"
         app.action_start_run()
         for _ in range(20):
@@ -119,7 +119,7 @@ async def test_tui_base_model_selection_feeds_run_config(
                 break
 
     assert captured_tui_configs
-    assert captured_tui_configs[-1].base_model_id == "unsloth/Phi-3-mini-4k-instruct"
+    assert captured_tui_configs[-1].base_model_id == "unsloth/Meta-Llama-3.1-8B-Instruct"
 
 
 @pytest.mark.asyncio
