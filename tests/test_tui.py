@@ -100,6 +100,29 @@ async def test_tui_blank_sample_count_leaves_choice_to_agent(
 
 
 @pytest.mark.asyncio
+async def test_tui_base_model_selection_feeds_run_config(
+    captured_tui_configs: list[RunConfig],
+) -> None:
+    from textual.widgets import Select
+
+    app = EvoLoRAApp()
+    async with app.run_test(size=(140, 40)) as pilot:
+        # defaults to the 8B model
+        assert app._selected_base_model() == "unsloth/Meta-Llama-3.1-8B-Instruct"
+        # user picks the Phi model instead
+        app.query_one("#base-model-select", Select).value = "unsloth/Phi-3-mini-4k-instruct"
+        app.query_one("#goal-input", Input).value = "sql queries"
+        app.action_start_run()
+        for _ in range(20):
+            await pilot.pause(0.05)
+            if captured_tui_configs:
+                break
+
+    assert captured_tui_configs
+    assert captured_tui_configs[-1].base_model_id == "unsloth/Phi-3-mini-4k-instruct"
+
+
+@pytest.mark.asyncio
 async def test_tui_eval_approval_event_enables_yes_no_buttons() -> None:
     app = EvoLoRAApp()
 

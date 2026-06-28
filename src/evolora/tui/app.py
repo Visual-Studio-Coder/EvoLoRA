@@ -315,6 +315,11 @@ class EvoLoRAApp(App[None]):
         display: none;
     }
 
+    #base-model-select {
+        width: 22;
+        margin: 0 0 0 1;
+    }
+
     #cancel-button {
         min-width: 12;
         margin: 0 0 0 1;
@@ -407,6 +412,15 @@ class EvoLoRAApp(App[None]):
                     placeholder="What kind of specialized model would you like to build today?",
                     id="goal-input",
                 )
+                yield Select(
+                    [
+                        ("Llama 3.1 8B", "unsloth/Meta-Llama-3.1-8B-Instruct"),
+                        ("Phi-3-mini (fast)", "unsloth/Phi-3-mini-4k-instruct"),
+                    ],
+                    id="base-model-select",
+                    allow_blank=False,
+                    value=self._default_base_model(),
+                )
                 yield Static("# samples", id="sample-label")
                 yield Input(
                     value="30",
@@ -470,6 +484,7 @@ class EvoLoRAApp(App[None]):
             chat_button.add_class("active")
             self.query_one("#start-button", Button).disabled = True
             self.query_one("#model-select").display = True
+            self.query_one("#base-model-select").display = False
             self.query_one("#sample-label").display = False
             self.query_one("#sample-count-input").display = False
             goal_input.placeholder = "Ask the selected model… (Enter to send)"
@@ -485,6 +500,7 @@ class EvoLoRAApp(App[None]):
             chat_button.remove_class("active")
             self.query_one("#start-button", Button).disabled = self._run_active
             self.query_one("#model-select").display = False
+            self.query_one("#base-model-select").display = True
             self.query_one("#sample-label").display = True
             self.query_one("#sample-count-input").display = True
             goal_input.placeholder = "What kind of specialized model would you like to build today?"
@@ -523,6 +539,28 @@ class EvoLoRAApp(App[None]):
         if value is None or value is Select.BLANK:
             return "lora_model"
         return str(value)
+
+    _BASE_MODELS = (
+        "unsloth/Meta-Llama-3.1-8B-Instruct",
+        "unsloth/Phi-3-mini-4k-instruct",
+    )
+
+    def _default_base_model(self) -> str:
+        configured = get_config().base_model_id
+        return configured if configured in self._BASE_MODELS else self._BASE_MODELS[0]
+
+    def _selected_base_model(self) -> str:
+        try:
+            value = self.query_one("#base-model-select", Select).value
+        except Exception:
+            return self._default_base_model()
+        if value is None or value is Select.BLANK:
+            return self._default_base_model()
+        return str(value)
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "base-model-select":
+            self._update_config_panel()
 
     def _send_chat(self, prompt: str) -> None:
         if not prompt or self._chat_busy:
@@ -631,7 +669,7 @@ class EvoLoRAApp(App[None]):
             patience=cfg.patience,
             training_backend=cfg.training_backend,
             model_runner=cfg.model_runner,
-            base_model_id=cfg.base_model_id,
+            base_model_id=self._selected_base_model(),
             training_sample_count=self._requested_sample_count,
             goal=self._goal,
             require_retrain_approval=True,
@@ -933,7 +971,7 @@ class EvoLoRAApp(App[None]):
     ) -> None:
         cfg = get_config()
         lines = [
-            ("base_model", cfg.base_model_id.split("/")[-1]),
+            ("base_model", self._selected_base_model().split("/")[-1]),
             ("backend", cfg.training_backend),
             # In remote mode the mock runner is bypassed — baseline + eval run the real model
             # on the VM and are LLM-judged. Show that instead of the unused "mock" label.
