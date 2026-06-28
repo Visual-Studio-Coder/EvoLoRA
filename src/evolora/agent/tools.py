@@ -52,7 +52,16 @@ TOOLS: list[dict] = [
                         "items": {
                             "type": "object",
                             "properties": {
-                                "prompt": {"type": "string"},
+                                "prompt": {
+                                    "type": "string",
+                                    "description": (
+                                        "The full input the model sees. Must be self-contained. "
+                                        "For SQL goals it MUST start with CREATE TABLE statements "
+                                        "(columns + types) for every table referenced, then a blank "
+                                        "line, then the request. For extraction/parsing goals, "
+                                        "include the source text/record."
+                                    ),
+                                },
                                 "expected_output": {
                                     "type": "object",
                                     "description": "The exact correct JSON object the model should output.",
@@ -90,7 +99,16 @@ TOOLS: list[dict] = [
                                 "items": {
                                     "type": "object",
                                     "properties": {
-                                        "prompt": {"type": "string"},
+                                        "prompt": {
+                                            "type": "string",
+                                            "description": (
+                                                "The full input the model trains on. Must be "
+                                                "self-contained. For SQL goals it MUST start with "
+                                                "CREATE TABLE statements (columns + types) for every "
+                                                "table the completion references, then a blank line, "
+                                                "then the request."
+                                            ),
+                                        },
                                         "completion": {
                                             "type": "string",
                                             "description": "The desired model response. Must be a valid JSON string; for SQL tasks use {\"sql\": \"...\"}.",
