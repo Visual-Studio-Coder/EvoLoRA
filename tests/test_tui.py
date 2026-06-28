@@ -141,6 +141,20 @@ async def test_tui_validation_event_updates_hyperparameter_pane() -> None:
         assert "1.0e-04" in rendered  # learning_rate formatted
 
 
+@pytest.mark.asyncio
+async def test_tui_copy_log_action_copies_agent_log(monkeypatch) -> None:
+    app = EvoLoRAApp()
+    copied: list[str] = []
+
+    async with app.run_test(size=(120, 40)):
+        monkeypatch.setattr(app, "copy_to_clipboard", lambda text: copied.append(text))
+        app._agent_log().write("distinctive reasoning line 42")
+        app.action_copy_log()
+
+    assert copied
+    assert "distinctive reasoning line 42" in copied[0]
+
+
 def test_tui_exception_writer_saves_traceback(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(tui_app, "default_log_dir", lambda: tmp_path)
     app = EvoLoRAApp()
