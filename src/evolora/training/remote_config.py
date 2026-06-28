@@ -56,6 +56,9 @@ def build_training_config_payload(
     hp = plan.hyperparams
 
     vm_config = {
+        # train.py reads base_model_id from config.json; without it, it falls back to its
+        # hardcoded default (the wrong model). Must be written so the SELECTED model is trained.
+        "base_model_id": run_config.base_model_id,
         "learning_rate": hp.learning_rate,
         "lora_rank": hp.r,
         "lora_alpha": hp.lora_alpha,
