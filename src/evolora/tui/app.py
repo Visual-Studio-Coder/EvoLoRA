@@ -439,6 +439,9 @@ class EvoLoRAApp(App[None]):
         self._approval_context = None
         self.query_one("#start-button", Button).disabled = True
         self.query_one("#cancel-button", Button).disabled = False
+        # Lock the goal + sample inputs for the duration of the run.
+        self.query_one("#goal-input", Input).disabled = True
+        self.query_one("#sample-count-input", Input).disabled = True
         self._set_retrain_buttons(False)
         self._agent_log().clear()
         self._examples_log().clear()
@@ -530,6 +533,8 @@ class EvoLoRAApp(App[None]):
             self._run_active = False
             self.query_one("#start-button", Button).disabled = False
             self.query_one("#cancel-button", Button).disabled = True
+            self.query_one("#goal-input", Input).disabled = False
+            self.query_one("#sample-count-input", Input).disabled = False
             self._set_retrain_buttons(False)
             self._update_examples_from_record()
 

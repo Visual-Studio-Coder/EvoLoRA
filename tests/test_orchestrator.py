@@ -280,6 +280,26 @@ async def test_exact_training_sample_count_is_enforced():
 
 
 @pytest.mark.asyncio
+async def test_training_examples_stack_across_iterations():
+    cfg = RunConfig(max_iterations=2, target_score=1.0, training_sample_count=10)
+    orch = Orchestrator(
+        config=cfg,
+        eval_set=LOCKED_EVAL_SET,
+        adaptive_eval_set=ADAPTIVE_EVAL_SET,
+        judge=StaticJudge(rating=0.3),
+        retrain_advisor=StaticRetrainAdvisor(retrain=True),
+        run_store=InMemoryRunStore(),
+    )
+    _, rec = await _collect(orch)
+
+    assert len(rec.iterations) == 2
+    # Each iteration adds training_sample_count more examples (stacking): 10 -> 20.
+    assert len(rec.iterations[0].plan.data_spec.examples) == 10
+    assert len(rec.iterations[1].plan.data_spec.examples) == 20
+    assert rec.iterations[1].plan.data_spec.max_examples == 20
+
+
+@pytest.mark.asyncio
 async def test_no_secrets_in_prompts():
     """Eval prompts passed to runner must not contain expected answers."""
     prompts = LOCKED_EVAL_SET.prompts_only()

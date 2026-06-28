@@ -75,6 +75,7 @@ class Orchestrator:
         self._approval_future: asyncio.Future[bool] | None = None
         self._record = RunRecord(config=config)
         self._run_logger = run_logger or RunLogger(self._record.run_id)
+        self._accumulated_examples: list[dict] = []
 
     def cancel(self) -> None:
         self._cancelled = True
@@ -108,20 +109,32 @@ class Orchestrator:
         generated_eval_records: list[dict[str, str]] | None = None
         if rec.config.goal and isinstance(self._planner, MiniMaxPlanner):
             yield await emit(EventKind.STATUS_CHANGED, f"MiniMax generating evals for goal: {rec.config.goal[:60]}")
-            try:
-                generated = await self._planner.generate_evals(rec.config.goal)
-                if generated:
-                    samples = [
-                        EvalSample(sample_id=f"gen-{i + 1:03d}", prompt=g["prompt"], expected=g["expected"])
-                        for i, g in enumerate(generated)
-                    ]
-                    self._eval_set = LockedEvalSet(samples)
-                    self._evaluator = GenericEvaluator()
-                    self._adaptive_set = None
-                    generated_eval_records = self._eval_records_for_approval(samples)
-                    yield await emit(EventKind.LOG, f"MiniMax generated {len(samples)} goal-specific eval examples")
-            except Exception as exc:  # pragma: no cover - defensive; fall back to default eval set
-                yield await emit(EventKind.LOG, f"Eval generation failed, using default eval set ({exc})")
+            # Evals are made up on the spot from the goal — no canned set. Retry transient
+            # failures rather than silently dropping to the (off-topic) fallback set.
+            generated: list[dict] | None = None
+            for attempt in range(1, 4):
+                try:
+                    generated = await self._planner.generate_evals(rec.config.goal)
+                    if generated:
+                        break
+                    yield await emit(EventKind.LOG, f"Eval generation returned nothing (try {attempt}/3), retrying…")
+                except Exception as exc:
+                    yield await emit(EventKind.LOG, f"Eval generation error (try {attempt}/3): {exc}")
+            if generated:
+                samples = [
+                    EvalSample(sample_id=f"gen-{i + 1:03d}", prompt=g["prompt"], expected=g["expected"])
+                    for i, g in enumerate(generated)
+                ]
+                self._eval_set = LockedEvalSet(samples)
+                self._evaluator = GenericEvaluator()
+                self._adaptive_set = None
+                generated_eval_records = self._eval_records_for_approval(samples)
+                yield await emit(EventKind.LOG, f"MiniMax generated {len(samples)} goal-specific eval examples")
+            else:
+                yield await emit(
+                    EventKind.LOG,
+                    "[warn] MiniMax could not generate evals after 3 tries — using fallback eval set",
+                )
 
         if generated_eval_records:
             self._approval_future = asyncio.get_running_loop().create_future()
@@ -220,16 +233,17 @@ class Orchestrator:
             # --- VALIDATE DATA ---
             rec.status = RunStatus.VALIDATING
             validated_plan = self._validate_plan(plan)
+            before = len(self._accumulated_examples)
+            validated_plan = self._stack_training_examples(validated_plan)
+            total_count = len(validated_plan.data_spec.examples)
+            added = total_count - before
             exact_count = rec.config.training_sample_count
-            count_note = (
-                f"exact requested count {exact_count}"
-                if exact_count is not None
-                else "agent-selected count"
-            )
             yield await emit(
                 EventKind.VALIDATION_COMPLETE,
-                f"Plan validated: {len(validated_plan.data_spec.examples)} examples ({count_note})",
-                example_count=len(validated_plan.data_spec.examples),
+                f"Plan validated: {total_count} examples "
+                f"(+{added} new this iteration, stacked across {iteration} iter)",
+                example_count=total_count,
+                new_example_count=added,
                 requested_training_sample_count=exact_count,
                 hyperparams=validated_plan.hyperparams.model_dump(),
             )
@@ -580,6 +594,19 @@ class Orchestrator:
             examples.append(self._synthetic_training_example(len(examples) + 1))
 
         data_spec = plan.data_spec.model_copy(update={"examples": examples, "max_examples": requested})
+        return plan.model_copy(update={"data_spec": data_spec})
+
+    def _stack_training_examples(self, plan: AgentPlan) -> AgentPlan:
+        """Accumulate training examples across iterations so the set keeps growing:
+        iteration N trains on this round's examples PLUS every prior round's, so the
+        count stacks by ~training_sample_count each iteration (30 -> 60 -> 90 …)."""
+        self._accumulated_examples.extend(plan.data_spec.examples)
+        data_spec = plan.data_spec.model_copy(
+            update={
+                "examples": list(self._accumulated_examples),
+                "max_examples": len(self._accumulated_examples),
+            }
+        )
         return plan.model_copy(update={"data_spec": data_spec})
 
     def _synthetic_training_example(self, index: int) -> dict[str, str]:
