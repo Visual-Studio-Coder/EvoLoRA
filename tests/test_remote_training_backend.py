@@ -188,6 +188,7 @@ async def test_remote_training_backend_pushes_files_runs_commands_and_yields_art
     assert "cp -r lora_model adapters/" in fake_client.commands[2]
     assert fake_client.exec_kwargs[:2] == [{"get_pty": True}, {"get_pty": True}]
     assert json.loads(fake_client.sftp.files["/workspace/config.json"]) == {
+        "base_model_id": cfg.base_model_id,  # so train.py trains the SELECTED model
         "learning_rate": 2e-4,
         "lora_alpha": 16,
         "lora_rank": 8,
