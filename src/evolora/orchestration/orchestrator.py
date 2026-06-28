@@ -491,39 +491,9 @@ class Orchestrator:
                 yield await self._finish(rec, RunStatus.COMPLETE, StopReason.JUDGE_ACCEPTED, emit)
                 return
 
-            if (
-                retrain_decision is not None
-                and retrain_decision.retrain_recommended
-                and iteration < rec.config.max_iterations
-                and rec.config.require_retrain_approval
-            ):
-                self._approval_future = asyncio.get_running_loop().create_future()
-                yield await emit(
-                    EventKind.USER_APPROVAL_REQUIRED,
-                    f"Approve another training round? Judge rating {judge_report.rating:.2f}",
-                    rating=judge_report.rating if judge_report else score,
-                    summary=judge_report.summary if judge_report else "",
-                    reason=retrain_decision.reason,
-                    suggested_focus=retrain_decision.suggested_focus,
-                )
-                approved = await self._approval_future
-                self._approval_future = None
-                yield await emit(
-                    EventKind.USER_APPROVAL_RECEIVED,
-                    "User approved retrain" if approved else "User declined retrain",
-                    approved=approved,
-                )
-                if self._cancelled:
-                    yield await self._finish(rec, RunStatus.CANCELLED, StopReason.CANCELLED, emit)
-                    return
-                if not approved:
-                    yield await self._finish(
-                        rec,
-                        RunStatus.COMPLETE,
-                        StopReason.USER_DECLINED_RETRAIN,
-                        emit,
-                    )
-                    return
+            # When the judge still wants more training (below target), auto-iterate without
+            # asking — the user is only prompted once the model is 'good enough' (judge
+            # accepted / target reached), via the keep-training gate.
 
             # --- STOP CONDITIONS ---
             stop = self._check_stop(rec, score)
