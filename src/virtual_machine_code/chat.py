@@ -44,4 +44,6 @@ outputs = model.generate(
 decoded = tokenizer.batch_decode(outputs, skip_special_tokens=True)[0]
 response = decoded.split("### Response:")[-1].strip()
 
+# Marker lets the caller extract just the response from unsloth's noisy stdout.
+print("<<<EVOLORA_RESPONSE>>>", flush=True)
 print(response)

@@ -126,6 +126,10 @@ class FakeSSHClient:
         self.exec_kwargs.append(kwargs)
         if "baseline_evaluate.py" in command:
             return None, FakeStdout(["baseline 1\n", "baseline done\n"]), FakeStderr()
+        if "chat.py" in command:
+            return None, FakeStdout(
+                ["unsloth banner\n", "<<<EVOLORA_RESPONSE>>>\n", "SELECT * FROM t;\n"]
+            ), FakeStderr()
         if "train.py" in command:
             return None, FakeStdout(["train step 1\n", "train done\n"]), FakeStderr()
         return None, FakeStdout(["eval done\n"]), FakeStderr()
@@ -233,6 +237,26 @@ async def test_remote_training_backend_evaluates_base_model_on_vm(tmp_path):
     assert any(event.get("message") == "baseline 1" for event in events)
     assert final["done"] is True
     assert len(final["eval_records"]) == len(LOCKED_EVAL_SET)
+
+
+@pytest.mark.asyncio
+async def test_remote_backend_chat_returns_model_response(tmp_path):
+    chat_script = tmp_path / "chat.py"
+    chat_script.write_text("print('chat')\n", encoding="utf-8")
+    fake_client = FakeSSHClient()
+    backend = RemoteTrainingBackend(
+        ssh_host="gpu.example.com",
+        ssh_user="root",
+        ssh_key_path="C:/keys/evolora",
+        ssh_client_factory=lambda: fake_client,
+        chat_script_path=chat_script,
+    )
+
+    reply = await backend.chat("write a query")
+
+    assert reply == "SELECT * FROM t;"  # extracted after the marker, banner stripped
+    assert fake_client.sftp.files["/workspace/chat.py"] == "print('chat')\n"
+    assert any("python chat.py" in c for c in fake_client.commands)
 
 
 @pytest.mark.asyncio
