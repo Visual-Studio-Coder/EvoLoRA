@@ -88,17 +88,13 @@ def test_render_remote_files_matches_vm_contract() -> None:
     files = render_remote_files(payload, remote_config_path="/workspace/config.json")
     vm_config = json.loads(files[DEFAULT_REMOTE_CONFIG_PATH])
     training_rows = [
-        json.loads(line)
-        for line in files[DEFAULT_REMOTE_TRAINING_DATA_PATH].splitlines()
-        if line
+        json.loads(line) for line in files[DEFAULT_REMOTE_TRAINING_DATA_PATH].splitlines() if line
     ]
     evals = json.loads(files[DEFAULT_REMOTE_EVALS_PATH])
 
     assert vm_config["lora_rank"] == 16
     assert "run_id" not in vm_config
-    assert training_rows == [
-        {"instruction": "strict JSON", "input": "p", "output": '{"ok": true}'}
-    ]
+    assert training_rows == [{"instruction": "strict JSON", "input": "p", "output": '{"ok": true}'}]
     assert evals
     assert set(evals[0]) == {"input", "expected"}
 
@@ -214,7 +210,7 @@ def test_push_config_writes_json_over_sftp() -> None:
         ssh_host="gpu.example.com",
         ssh_user="trainer",
         ssh_port=2222,
-        ssh_key_path="C:/Users/emmad/.ssh/evolora",
+        ssh_key_path="/Users/vaibhavsatishkumar/.ssh/evolora",
         remote_config_path="/workspace/config.json",
         ssh_client_factory=lambda: fake_client,
     )
@@ -225,7 +221,7 @@ def test_push_config_writes_json_over_sftp() -> None:
     assert fake_client.connect_kwargs["hostname"] == "gpu.example.com"
     assert fake_client.connect_kwargs["username"] == "trainer"
     assert fake_client.connect_kwargs["port"] == 2222
-    assert fake_client.connect_kwargs["key_filename"] == "C:/Users/emmad/.ssh/evolora"
+    assert fake_client.connect_kwargs["key_filename"] == "/Users/vaibhavsatishkumar/.ssh/evolora"
     assert "/workspace/data" in fake_client.sftp.dirs
     assert '"lora_rank": 8' in fake_client.sftp.files["/workspace/config.json"]
     assert "/workspace/data/training_data.jsonl" in fake_client.sftp.files
