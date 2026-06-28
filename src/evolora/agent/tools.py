@@ -55,11 +55,14 @@ TOOLS: list[dict] = [
                                 "prompt": {
                                     "type": "string",
                                     "description": (
-                                        "The full input the model sees. Must be self-contained. "
-                                        "For SQL goals it MUST start with CREATE TABLE statements "
-                                        "(columns + types) for every table referenced, then a blank "
-                                        "line, then the request. For extraction/parsing goals, "
-                                        "include the source text/record."
+                                        "The full input the model sees. Must be self-contained: the "
+                                        "model is offline and cannot open URLs or look anything up, "
+                                        "so embed any schema/data inline in full (a URL alone is not "
+                                        "enough). For SQL goals it MUST start with CREATE TABLE "
+                                        "statements (columns + types) for every table referenced, "
+                                        "then a blank line, then the request. For JSON-schema goals, "
+                                        "write the complete schema inline. For extraction/parsing "
+                                        "goals, include the source text/record."
                                     ),
                                 },
                                 "expected_output": {
@@ -103,10 +106,13 @@ TOOLS: list[dict] = [
                                             "type": "string",
                                             "description": (
                                                 "The full input the model trains on. Must be "
-                                                "self-contained. For SQL goals it MUST start with "
-                                                "CREATE TABLE statements (columns + types) for every "
-                                                "table the completion references, then a blank line, "
-                                                "then the request."
+                                                "self-contained: the model is offline and cannot "
+                                                "open URLs or look anything up, so embed any "
+                                                "schema/data inline in full. For SQL goals it MUST "
+                                                "start with CREATE TABLE statements (columns + types) "
+                                                "for every table the completion references, then a "
+                                                "blank line, then the request. For JSON-schema goals, "
+                                                "write the complete schema inline."
                                             ),
                                         },
                                         "completion": {
