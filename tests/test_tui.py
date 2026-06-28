@@ -155,6 +155,28 @@ async def test_tui_copy_log_action_copies_agent_log(monkeypatch) -> None:
     assert "distinctive reasoning line 42" in copied[0]
 
 
+@pytest.mark.asyncio
+async def test_tui_chat_toggle_flips_mode_and_is_blocked_during_run() -> None:
+    app = EvoLoRAApp()
+
+    async with app.run_test(size=(120, 40)):
+        chat_button = app.query_one("#chat-toggle", Button)
+
+        app.action_toggle_chat()
+        assert app._chat_mode is True
+        assert str(chat_button.label) == "EXIT CHAT"
+        assert app.query_one("#start-button", Button).disabled is True
+
+        app.action_toggle_chat()
+        assert app._chat_mode is False
+        assert str(chat_button.label) == "CHAT"
+
+        # While a run is active, toggling chat is refused (no chatting mid-training).
+        app._run_active = True
+        app.action_toggle_chat()
+        assert app._chat_mode is False
+
+
 def test_tui_exception_writer_saves_traceback(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(tui_app, "default_log_dir", lambda: tmp_path)
     app = EvoLoRAApp()

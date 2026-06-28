@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import random
+import shlex
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -111,6 +112,7 @@ class RemoteTrainingBackend:
         evaluate_script_path: str | Path | None = None,
         train_script_path: str | Path | None = None,
         baseline_script_path: str | Path | None = None,
+        chat_script_path: str | Path | None = None,
     ) -> None:
         cfg = get_config()
         self._base_url = base_url
@@ -127,6 +129,7 @@ class RemoteTrainingBackend:
         self._evaluate_script_path = Path(evaluate_script_path) if evaluate_script_path else _default_evaluate_script_path()
         self._train_script_path = Path(train_script_path) if train_script_path else _default_train_script_path()
         self._baseline_script_path = Path(baseline_script_path) if baseline_script_path else _default_baseline_script_path()
+        self._chat_script_path = Path(chat_script_path) if chat_script_path else _default_chat_script_path()
 
     async def train(
         self,
@@ -256,7 +259,7 @@ class RemoteTrainingBackend:
     async def health_check(self) -> bool:
         return bool(self._ssh_host and self._ssh_user and self._ssh_key_path)
 
-    def _assert_configured(self, remote_payload: dict | None) -> None:
+    def _assert_ssh_configured(self) -> None:
         missing = [
             name
             for name, value in (
@@ -271,8 +274,31 @@ class RemoteTrainingBackend:
                 "RemoteTrainingBackend requires SSH configuration; missing "
                 + ", ".join(missing)
             )
+
+    def _assert_configured(self, remote_payload: dict | None) -> None:
+        self._assert_ssh_configured()
         if remote_payload is None:
             raise RuntimeError("RemoteTrainingBackend requires a VM config payload")
+
+    async def chat(self, prompt: str) -> str:
+        """One-shot inference against the trained adapter (lora_model) on the VM.
+
+        Pushes chat.py, runs it with the prompt, and returns just the model's
+        response (extracted via the <<<EVOLORA_RESPONSE>>> marker). Loads the model
+        per call, so the first reply is slow. Raises if SSH is unconfigured or the
+        VM has no trained adapter yet.
+        """
+        self._assert_ssh_configured()
+        await asyncio.to_thread(self._push_script, self._chat_script_path, "chat.py")
+        command = f"cd {self._remote_workspace} && python chat.py {shlex.quote(prompt)}"
+        lines: list[str] = []
+        async for line in self._exec_remote_command(command):
+            lines.append(line)
+        text = "\n".join(lines)
+        marker = "<<<EVOLORA_RESPONSE>>>"
+        if marker in text:
+            return text.split(marker, 1)[1].strip()
+        return lines[-1].strip() if lines else ""
 
     def _make_client(self):
         if self._ssh_client_factory is not None:
@@ -423,3 +449,8 @@ def _default_train_script_path() -> Path:
 def _default_baseline_script_path() -> Path:
     # Separate baseline evaluator: same eval format as VM evaluate.py, but loads the base model.
     return Path(__file__).resolve().parents[3] / "scripts" / "vm" / "baseline_evaluate.py"
+
+
+def _default_chat_script_path() -> Path:
+    # Single-prompt inference against the trained adapter (lora_model).
+    return Path(__file__).resolve().parents[3] / "src" / "virtual_machine_code" / "chat.py"
