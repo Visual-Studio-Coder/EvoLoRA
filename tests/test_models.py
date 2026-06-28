@@ -53,11 +53,12 @@ def test_run_record_is_not_terminal_initially():
 def test_training_sample_count_bounds():
     assert RunConfig().training_sample_count == 30
     assert RunConfig(training_sample_count=25).training_sample_count == 25
+    assert RunConfig(training_sample_count=5000).training_sample_count == 5000  # 4+ digits allowed
     assert RunConfig(training_sample_count=None).training_sample_count is None
     with pytest.raises(ValidationError):
         RunConfig(training_sample_count=0)
     with pytest.raises(ValidationError):
-        RunConfig(training_sample_count=501)
+        RunConfig(training_sample_count=100001)
 
 
 def test_no_improvement_count_zero_initially():
