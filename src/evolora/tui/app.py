@@ -8,7 +8,7 @@ from datetime import datetime
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
-from textual.widgets import Button, Input, ProgressBar, RichLog, Static
+from textual.widgets import Button, Input, ProgressBar, RichLog, Select, Static
 
 from evolora.agent.planner import get_planner
 from evolora.config import get_config
@@ -309,6 +309,12 @@ class EvoLoRAApp(App[None]):
         text-style: bold;
     }
 
+    #model-select {
+        width: 30;
+        margin: 0 0 0 1;
+        display: none;
+    }
+
     #cancel-button {
         min-width: 12;
         margin: 0 0 0 1;
@@ -409,6 +415,12 @@ class EvoLoRAApp(App[None]):
                     max_length=6,
                     id="sample-count-input",
                 )
+                yield Select(
+                    [("latest (lora_model)", "lora_model")],
+                    id="model-select",
+                    allow_blank=False,
+                    value="lora_model",
+                )
                 yield Button("START", id="start-button")
                 yield Button("CANCEL", id="cancel-button", disabled=True)
                 yield Button("CHAT", id="chat-toggle")
@@ -457,21 +469,60 @@ class EvoLoRAApp(App[None]):
             chat_button.label = "EXIT CHAT"
             chat_button.add_class("active")
             self.query_one("#start-button", Button).disabled = True
-            goal_input.placeholder = "Ask your trained model… (Enter to send)"
+            self.query_one("#model-select").display = True
+            self.query_one("#sample-label").display = False
+            self.query_one("#sample-count-input").display = False
+            goal_input.placeholder = "Ask the selected model… (Enter to send)"
             goal_input.value = ""
             self._agent_log().write(
-                "[bright_green][chat][/] Chat mode ON — messages go to your trained model on the VM. "
-                "First reply loads the model (~30s)."
+                "[bright_green][chat][/] Chat mode ON — pick a model from the dropdown and type a "
+                "message. First reply loads the model (~30s)."
             )
-            self._set_state("CHAT", "chatting with the trained adapter (lora_model)")
+            self._set_state("CHAT", "chatting with a trained model")
+            self.run_worker(self._populate_models(), group="evolora-models", exclusive=True)
         else:
             chat_button.label = "CHAT"
             chat_button.remove_class("active")
             self.query_one("#start-button", Button).disabled = self._run_active
+            self.query_one("#model-select").display = False
+            self.query_one("#sample-label").display = True
+            self.query_one("#sample-count-input").display = True
             goal_input.placeholder = "What kind of specialized model would you like to build today?"
             self._agent_log().write("[bright_green][chat][/] Chat mode OFF")
             self._set_state("READY", "training mode")
         goal_input.focus()
+
+    async def _populate_models(self) -> None:
+        """Fill the model dropdown with the base model + previously trained adapters."""
+        cfg = get_config()
+        options: list[tuple[str, str]] = [
+            (f"base: {cfg.base_model_id.split('/')[-1]}", cfg.base_model_id)
+        ]
+        if cfg.training_backend == "remote":
+            try:
+                backend = get_backend("remote")
+                for path in await backend.list_adapters():
+                    label = (
+                        "latest (lora_model)"
+                        if path == "lora_model"
+                        else path.replace("adapters/", "")
+                    )
+                    options.append((label, path))
+            except Exception as exc:
+                self._agent_log().write(f"[#805000]Could not list trained models: {exc}[/]")
+        select = self.query_one("#model-select", Select)
+        select.set_options(options)
+        values = [value for _, value in options]
+        select.value = "lora_model" if "lora_model" in values else values[0]
+
+    def _selected_model(self) -> str:
+        try:
+            value = self.query_one("#model-select", Select).value
+        except Exception:
+            return "lora_model"
+        if value is None or value is Select.BLANK:
+            return "lora_model"
+        return str(value)
 
     def _send_chat(self, prompt: str) -> None:
         if not prompt or self._chat_busy:
@@ -492,8 +543,10 @@ class EvoLoRAApp(App[None]):
                 )
                 return
             backend = get_backend("remote")
-            reply = await backend.chat(prompt)
-            self._agent_log().write(f"[bold cyan]model ›[/] {reply or '(empty response)'}")
+            model_dir = self._selected_model()
+            reply = await backend.chat(prompt, model_dir)
+            short = model_dir.replace("adapters/", "").split("/")[-1]
+            self._agent_log().write(f"[bold cyan]model ({short}) ›[/] {reply or '(empty response)'}")
         except Exception as exc:
             self._agent_log().write(f"[red][x] chat failed:[/] {exc}")
             self._agent_log().write(

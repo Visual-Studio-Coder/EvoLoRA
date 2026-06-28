@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import random
+import re
 import shlex
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -234,6 +235,13 @@ class RemoteTrainingBackend:
             "done": False,
         }
 
+        # Archive this run's adapter so it persists and is selectable for chat.
+        try:
+            archived = await self._archive_adapter(run_id, remote_payload)
+            yield {"phase": "archive", "message": f"Saved model as {archived}", "done": False}
+        except Exception as exc:  # best-effort; never fail a run on archiving
+            yield {"phase": "archive", "message": f"Adapter archive skipped: {exc}", "done": False}
+
         adapter_path = f"{self._remote_workspace}/lora_model"
         checksum = hashlib.sha256(
             json.dumps(
@@ -280,17 +288,21 @@ class RemoteTrainingBackend:
         if remote_payload is None:
             raise RuntimeError("RemoteTrainingBackend requires a VM config payload")
 
-    async def chat(self, prompt: str) -> str:
-        """One-shot inference against the trained adapter (lora_model) on the VM.
+    async def chat(self, prompt: str, model_dir: str = "lora_model") -> str:
+        """One-shot inference against a chosen model on the VM.
 
-        Pushes chat.py, runs it with the prompt, and returns just the model's
-        response (extracted via the <<<EVOLORA_RESPONSE>>> marker). Loads the model
-        per call, so the first reply is slow. Raises if SSH is unconfigured or the
-        VM has no trained adapter yet.
+        ``model_dir`` is a trained adapter dir (e.g. ``lora_model`` or
+        ``adapters/<name>``) or a base model name. Pushes chat.py, runs it, and
+        returns just the model's response (extracted via the <<<EVOLORA_RESPONSE>>>
+        marker). Loads the model per call, so the first reply is slow. Raises if SSH
+        is unconfigured or the chosen model is missing.
         """
         self._assert_ssh_configured()
         await asyncio.to_thread(self._push_script, self._chat_script_path, "chat.py")
-        command = f"cd {self._remote_workspace} && python chat.py {shlex.quote(prompt)}"
+        command = (
+            f"cd {self._remote_workspace} && "
+            f"python chat.py {shlex.quote(prompt)} {shlex.quote(model_dir)}"
+        )
         lines: list[str] = []
         async for line in self._exec_remote_command(command):
             lines.append(line)
@@ -299,6 +311,36 @@ class RemoteTrainingBackend:
         if marker in text:
             return text.split(marker, 1)[1].strip()
         return lines[-1].strip() if lines else ""
+
+    async def list_adapters(self) -> list[str]:
+        """List selectable trained models on the VM: archived adapters/<name> dirs
+        plus the latest lora_model (if present). Returns model_dir paths for chat()."""
+        self._assert_ssh_configured()
+        command = (
+            f"cd {self._remote_workspace}; "
+            f"ls -1d adapters/*/ 2>/dev/null | sed 's:/*$::'; "
+            f"[ -d lora_model ] && echo lora_model; true"
+        )
+        names: list[str] = []
+        async for line in self._exec_remote_command(command):
+            name = line.strip()
+            if name and name not in names:
+                names.append(name)
+        return names
+
+    async def _archive_adapter(self, run_id: str, remote_payload: dict | None) -> str:
+        """Copy the just-trained lora_model to adapters/<slug> so it persists and
+        becomes selectable for chat. Best-effort; returns the archive label."""
+        goal = str((remote_payload or {}).get("goal") or "model")
+        label = f"{_slugify(goal)[:32] or 'model'}-{run_id[:6]}"
+        target = f"adapters/{label}"
+        command = (
+            f"cd {self._remote_workspace} && mkdir -p adapters && "
+            f"rm -rf {target} && cp -r lora_model {target}"
+        )
+        async for _ in self._exec_remote_command(command):
+            pass
+        return target
 
     def _make_client(self):
         if self._ssh_client_factory is not None:
@@ -395,6 +437,12 @@ class RemoteTrainingBackend:
         finally:
             loop.call_soon_threadsafe(queue.put_nowait, None)
             client.close()
+
+
+def _slugify(text: str) -> str:
+    """Filesystem-safe slug for adapter archive names."""
+    slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+    return slug or "model"
 
 
 def _try_unsloth_backend():
