@@ -76,7 +76,7 @@ class LoraHyperparams(BaseModel):
 class TrainingDataSpec(BaseModel):
     examples: list[dict[str, str]] = Field(default_factory=list)
     rationale: str = Field(default="")
-    max_examples: int = Field(default=50, ge=1, le=500)
+    max_examples: int = Field(default=50, ge=1, le=100000)
 
     @field_validator("examples")
     @classmethod
@@ -195,7 +195,7 @@ class RunConfig(BaseModel):
     training_backend: str = Field(default="mock")
     model_runner: str = Field(default="mock")
     base_model_id: str = Field(default="microsoft/Phi-3-mini-128k-instruct")
-    training_sample_count: int | None = Field(default=30, ge=1, le=500)
+    training_sample_count: int | None = Field(default=30, ge=1, le=100000)
     require_retrain_approval: bool = Field(default=False)
     created_at: datetime = Field(default_factory=_now)
 

@@ -388,7 +388,7 @@ class EvoLoRAApp(App[None]):
                     value="30",
                     placeholder="auto",
                     restrict=r"[0-9]*",
-                    max_length=3,
+                    max_length=6,
                     id="sample-count-input",
                 )
                 yield Button("START", id="start-button")
@@ -881,9 +881,9 @@ class EvoLoRAApp(App[None]):
         if not raw:
             return None
         count = int(raw)
-        if not 1 <= count <= 500:
-            self._set_state("INVALID", "training sample count must be blank or between 1 and 500")
-            self._agent_log().write("[red][x] Training sample count must be blank or between 1 and 500[/]")
+        if not 1 <= count <= 100000:
+            self._set_state("INVALID", "training sample count must be blank or between 1 and 100000")
+            self._agent_log().write("[red][x] Training sample count must be blank or between 1 and 100000[/]")
             self.query_one("#sample-count-input", Input).focus()
             return 0
         return count
