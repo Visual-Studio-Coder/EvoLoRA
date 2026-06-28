@@ -195,7 +195,9 @@ async def test_event_ordering():
 
 @pytest.mark.asyncio
 async def test_generated_evals_require_user_approval_before_locking():
-    cfg = RunConfig(max_iterations=1, target_score=1.0, goal="custom receipt parser")
+    cfg = RunConfig(
+        max_iterations=1, target_score=1.0, goal="custom receipt parser", require_retrain_approval=True
+    )
     orch = Orchestrator(
         config=cfg,
         eval_set=LOCKED_EVAL_SET,
