@@ -40,6 +40,11 @@ def _now():
     return datetime.now(UTC)
 
 
+# If the base model already scores at/above this on the generated evals, the evals are too
+# easy for it — regenerate a harder set once so there's room (and meaning) to improve.
+HARD_EVAL_THRESHOLD = 0.85
+
+
 class Orchestrator:
     """Drives the EvoLoRA loop: baseline → plan → train → eval → repeat."""
 
@@ -77,6 +82,8 @@ class Orchestrator:
         self._run_logger = run_logger or RunLogger(self._record.run_id)
         self._accumulated_examples: list[dict] = []
         self._keep_training = False
+        self._last_baseline_score = 0.0
+        self._baseline_ok = True
 
     def cancel(self) -> None:
         self._cancelled = True
@@ -166,37 +173,62 @@ class Orchestrator:
         # --- BASELINE ---
         rec.status = RunStatus.BASELINE
         yield await emit(EventKind.STATUS_CHANGED, "Running baseline evaluation")
-        if rec.config.training_backend == "remote" and callable(getattr(self._backend, "evaluate_base", None)):
-            try:
-                baseline_payload = build_baseline_config_payload(
-                    run_id=rid,
-                    run_config=rec.config,
-                    eval_set=self._eval_set,
-                )
-                remote_baseline_records = None
-                baseline_stream = await self._backend.evaluate_base(baseline_payload)  # type: ignore[attr-defined]
-                async for progress in baseline_stream:
-                    if progress.get("done"):
-                        remote_baseline_records = progress.get("eval_records")
-                        continue
-                    message = str(progress.get("message", "")).strip()
-                    if message:
-                        phase = str(progress.get("phase", "baseline"))
-                        yield await emit(EventKind.LOG, f"[remote:{phase}] {message}")
-                if remote_baseline_records is None:
-                    raise RuntimeError("Remote baseline did not return eval records")
-                baseline_score, _, _ = await self._judge_remote_evals(remote_baseline_records)
-            except Exception as exc:
-                rec.error = str(exc)
-                yield await emit(EventKind.LOG, f"Remote baseline failed: {exc}")
-                yield await self._finish(rec, RunStatus.FAILED, StopReason.BACKEND_UNAVAILABLE, emit)
-                return
-        else:
-            baseline_score, _, _ = await self._eval(adapter_path=None)
+        async for ev in self._run_baseline(rec, rid, emit):
+            yield ev
+        if not self._baseline_ok:
+            yield await self._finish(rec, RunStatus.FAILED, StopReason.BACKEND_UNAVAILABLE, emit)
+            return
+        baseline_score = self._last_baseline_score
         rec.baseline_score = baseline_score
         rec.best_score = baseline_score
         yield await emit(EventKind.BASELINE_COMPLETE, f"Baseline score: {baseline_score:.3f}", score=baseline_score)
         await self._store.save(rec)
+
+        # --- ADAPTIVE EVAL DIFFICULTY ---
+        # If the base model already aces the evals, they're too easy for a capable model —
+        # regenerate a harder set once and re-baseline so there's room (and meaning) to improve.
+        if (
+            baseline_score >= HARD_EVAL_THRESHOLD
+            and rec.config.goal
+            and isinstance(self._planner, MiniMaxPlanner)
+        ):
+            yield await emit(
+                EventKind.LOG,
+                f"Base model scored {baseline_score:.2f} (>= {HARD_EVAL_THRESHOLD:.2f}) — evals too "
+                "easy; generating a harder set.",
+            )
+            try:
+                harder = await self._planner.generate_evals(rec.config.goal, difficulty="hard")
+            except Exception:
+                harder = None
+            if harder:
+                samples = [
+                    EvalSample(sample_id=f"hard-{i + 1:03d}", prompt=g["prompt"], expected=g["expected"])
+                    for i, g in enumerate(harder)
+                ]
+                self._eval_set = LockedEvalSet(samples)
+                rec.eval_set_hash = self._eval_set.hash
+                yield await emit(
+                    EventKind.EVAL_SET_LOCKED,
+                    f"Harder eval set locked ({len(samples)} examples, hash={self._eval_set.hash[:12]}…)",
+                    hash=self._eval_set.hash,
+                    size=len(self._eval_set),
+                )
+                rec.status = RunStatus.BASELINE
+                async for ev in self._run_baseline(rec, rid, emit):
+                    yield ev
+                if not self._baseline_ok:
+                    yield await self._finish(rec, RunStatus.FAILED, StopReason.BACKEND_UNAVAILABLE, emit)
+                    return
+                baseline_score = self._last_baseline_score
+                rec.baseline_score = baseline_score
+                rec.best_score = baseline_score
+                yield await emit(
+                    EventKind.BASELINE_COMPLETE,
+                    f"Baseline on harder evals: {baseline_score:.3f}",
+                    score=baseline_score,
+                )
+                await self._store.save(rec)
 
         # --- MAIN LOOP ---
         for iteration in range(1, rec.config.max_iterations + 1):
@@ -658,6 +690,41 @@ class Orchestrator:
             return []
         last = rec.iterations[-1]
         return [r for r in last.eval_results if not r.passed]
+
+    async def _run_baseline(self, rec: RunRecord, rid: str, emit):
+        """Run the baseline eval (remote VM or local). Stores the score in
+        self._last_baseline_score and success in self._baseline_ok; yields progress events."""
+        self._baseline_ok = True
+        if rec.config.training_backend == "remote" and callable(
+            getattr(self._backend, "evaluate_base", None)
+        ):
+            try:
+                baseline_payload = build_baseline_config_payload(
+                    run_id=rid,
+                    run_config=rec.config,
+                    eval_set=self._eval_set,
+                )
+                remote_baseline_records = None
+                baseline_stream = await self._backend.evaluate_base(baseline_payload)  # type: ignore[attr-defined]
+                async for progress in baseline_stream:
+                    if progress.get("done"):
+                        remote_baseline_records = progress.get("eval_records")
+                        continue
+                    message = str(progress.get("message", "")).strip()
+                    if message:
+                        phase = str(progress.get("phase", "baseline"))
+                        yield await emit(EventKind.LOG, f"[remote:{phase}] {message}")
+                if remote_baseline_records is None:
+                    raise RuntimeError("Remote baseline did not return eval records")
+                self._last_baseline_score, _, _ = await self._judge_remote_evals(
+                    remote_baseline_records
+                )
+            except Exception as exc:
+                rec.error = str(exc)
+                yield await emit(EventKind.LOG, f"Remote baseline failed: {exc}")
+                self._baseline_ok = False
+        else:
+            self._last_baseline_score, _, _ = await self._eval(adapter_path=None)
 
     async def _keep_training_gate(self, emit, rating: float, summary: str, reason: str):
         """Ask the user whether to keep training to make the model smarter instead of
