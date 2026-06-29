@@ -1,4 +1,5 @@
-# EvoLoRA
+# EvoLoRA - AI Engineer World's Fair Hackathon 2026 (FINALIST)
+Submission: https://cerebralvalley.ai/e/aiewf-hackathon-2026/hackathon/gallery?project=14
 
 EvoLoRA is an auditable, bounded self-improvement loop for LoRA fine-tuning. You give it a plain-English goal; a MiniMax agent plans the evaluation set, the training data, and the LoRA hyperparameters; Python validates and controls every step; a small model is trained on a GPU and scored against a locked benchmark; and the best adapter is preserved with a human-readable name. The whole learning process is made visible: the agent plans, the model trains, results are scored and judged, and you decide whether to keep going — or hand the whole thing off to run autonomously.
 
